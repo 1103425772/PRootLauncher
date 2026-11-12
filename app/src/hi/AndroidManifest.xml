@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- hi 版（targetSdk 34 / Android 12+）覆盖：声明 FGS dataSync 权限与 foregroundServiceType -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
+    <application>
+        <service
+            android:name=".TtydService"
+            android:foregroundServiceType="dataSync" />
+        <service
+            android:name=".ContainerService"
+            android:foregroundServiceType="dataSync" />
+    </application>
+
+</manifest>

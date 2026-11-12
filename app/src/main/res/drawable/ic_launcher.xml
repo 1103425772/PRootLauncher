@@ -1,0 +1,47 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- v25：MIUI/HyperOS 风格图标 —— 圆角渐变底 + 终端提示符 ">_" + 容器栈 -->
+    <path
+        android:pathData="M8,8 h92 a26,26 0 0 1 26,26 v40 a26,26 0 0 1 -26,26 h-92 a26,26 0 0 1 -26,-26 v-40 a26,26 0 0 1 26,-26 z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="54" android:startY="6"
+                android:endX="54" android:endY="102"
+                android:type="linear">
+                <item android:offset="0" android:color="#FF4A8BFF" />
+                <item android:offset="0.55" android:color="#FF2363E8" />
+                <item android:offset="1" android:color="#FF173FB8" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- 终端面板：半透明深蓝圆角窗 -->
+    <path
+        android:fillColor="#221A3FA6"
+        android:pathData="M25,33 h58 a9,9 0 0 1 9,9 v30 a9,9 0 0 1 -9,9 h-58 a9,9 0 0 1 -9,-9 v-30 a9,9 0 0 1 9,-9 z" />
+    <!-- 提示符 ">" -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M40,52 L58,63 L40,74" />
+    <!-- 下划线 "_" -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="7"
+        android:strokeLineCap="round"
+        android:pathData="M40,84 L76,84" />
+    <!-- 容器栈提示：右上两层小圆角片 -->
+    <path
+        android:fillColor="#66FFFFFF"
+        android:pathData="M70,26 h14 a5,5 0 0 1 5,5 v12 h-24 v-12 a5,5 0 0 1 5,-5 z" />
+    <path
+        android:fillColor="#B3FFFFFF"
+        android:pathData="M66,32 h22 a5,5 0 0 1 5,5 v12 h-32 v-12 a5,5 0 0 1 5,-5 z" />
+</vector>

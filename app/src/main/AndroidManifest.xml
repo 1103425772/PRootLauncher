@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.proot.launcher">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- 前台服务：持有 ttyd 进程 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- v27：Android 14+ 后台播放音频必须挂 mediaPlayback 类型前台服务（targetSdk 34+ 需此权限） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- v27：Android 13+ 前台服务通知依赖通知权限 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 申请电池优化白名单 -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <application
+        android:label="PRoot Launcher"
+        android:icon="@drawable/ic_launcher"
+        android:roundIcon="@drawable/ic_launcher"
+        android:theme="@style/AppTheme"
+        android:extractNativeLibs="true"
+        android:allowBackup="true"
+        android:requestLegacyExternalStorage="true"
+        android:networkSecurityConfig="@xml/network_security_config">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|keyboardHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".TerminalActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name=".WebTerminalActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- 前台服务：持有 ttyd 进程，常驻通知 -->
+        <service
+            android:name=".TtydService"
+            android:enabled="true"
+            android:exported="false" />
+
+        <!-- v24 前台服务：容器会话后台保活（防 app 退后台被冻结断网） -->
+        <service
+            android:name=".ContainerService"
+            android:enabled="true"
+            android:exported="false" />
+
+        <!-- v27 前台服务：给音频桥接提供媒体播放身份（Android 14+ 后台出声硬要求） -->
+        <service
+            android:name=".AudioService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+
+    </application>
+
+    <!-- 包可见性：启动已安装的 termux-x11 显示端（Android 11+ 需要） -->
+    <queries>
+        <package android:name="com.termux.x11" />
+    </queries>
+</manifest>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- v24 PCL 风格：浅灰蓝底 + 白卡片 + PCL 蓝 -->
+    <color name="primary">#3D8BFD</color>
+    <color name="primary_dark">#2563EB</color>
+    <color name="accent">#5BA8FF</color>
+    <color name="background">#EFF3F8</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="border">#DCE4F0</color>
+    <color name="text_primary">#17233D</color>
+    <color name="text_secondary">#5B6B85</color>
+    <color name="terminal_bg">#0B1020</color>
+    <color name="terminal_text">#C8E6FF</color>
+    <color name="danger">#E5484D</color>
+</resources>

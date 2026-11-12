@@ -1,0 +1,15 @@
+# Gradle / Android
+.gradle/
+build/
+.kotlin/
+*.apk
+*.idsig
+local.properties
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# 系统
+.DS_Store

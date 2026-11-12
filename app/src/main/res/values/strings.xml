@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PRoot Launcher</string>
+    <string name="title_download">下载 RootFS</string>
+    <string name="title_local">本地 RootFS</string>
+    <string name="hint_url">输入 rootfs 下载链接 (tar.xz / tar.gz)</string>
+    <string name="btn_download">下载并解压</string>
+    <string name="btn_select">选择本地文件</string>
+    <string name="btn_launch">启动</string>
+    <string name="btn_delete">删除</string>
+    <string name="title_available">已安装的 RootFS</string>
+    <string name="msg_no_rootfs">还没有安装任何 rootfs</string>
+    <string name="msg_downloading">正在下载...</string>
+    <string name="msg_extracting">正在解压...</string>
+    <string name="msg_installing_proot">正在安装 proot...</string>
+    <string name="msg_launching">正在启动...</string>
+    <string name="msg_done">完成</string>
+    <string name="msg_error">错误</string>
+    <string name="default_url">https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/aarch64/alpine-minirootfs-3.20.3-aarch64.tar.gz</string>
+
+    <!-- MainActivity：提示 / 对话框 / 状态 -->
+    <string name="msg_enter_url">请输入下载链接</string>
+    <string name="msg_proot_not_ready">proot 尚未安装完成，请稍候</string>
+    <string name="choice_web_terminal">Web 终端（自动装 ttyd）</string>
+    <string name="choice_rootfs_shell">进入 RootFS（Shell）</string>
+    <string name="dialog_delete_title">删除 RootFS</string>
+    <string name="dialog_delete_message">确定要删除 %1$s 吗？此操作不可撤销。</string>
+    <string name="btn_cancel">取消</string>
+    <string name="msg_deleted">已删除</string>
+    <string name="msg_proot_init_failed">proot 初始化失败: %1$s</string>
+    <string name="msg_check_storage">请检查存储空间</string>
+    <string name="msg_download_failed">下载失败: %1$s</string>
+    <string name="msg_download_invalid">下载文件无效: %1$s</string>
+    <string name="msg_import_failed">导入失败: %1$s</string>
+    <string name="msg_extract_failed">解压失败: %1$s</string>
+    <string name="msg_done_name">完成: %1$s</string>
+    <string name="err_rootfs_incomplete">rootfs 解压后缺少基本文件（无 bin/sh 或 etc/os-release）</string>
+    <string name="err_file_not_found">文件不存在</string>
+    <string name="err_file_too_small">文件过小 (%1$d bytes)，可能下载的是错误页面而非 rootfs，请检查下载链接是否有效</string>
+    <string name="err_bad_header">无法读取文件头</string>
+    <string name="err_not_targz">文件格式不是 tar.gz 或 tar.xz（文件头: %1$s），请检查下载链接</string>
+    <string name="err_archive_too_short">压缩内容太短，不是有效的 tar 归档</string>
+    <string name="err_not_tar">压缩包内容不是 tar 归档（可能下载了错误页面），请检查下载链接</string>
+    <string name="err_verify_decompress">解压校验失败: %1$s</string>
+    <string name="err_read_file">读取文件失败: %1$s</string>
+
+    <!-- TerminalActivity -->
+    <string name="toast_ctrl_d">已发送 Ctrl+D</string>
+    <string name="btn_exit_terminal">退出</string>
+
+    <!-- X11 / termux-x11 -->
+    <string name="choice_x11_run">运行 X11 程序（输入命令）</string>
+    <string name="x11_dialog_title">运行 X11 程序</string>
+    <string name="x11_dialog_hint">输入命令，如: startxfce4 / xterm / firefox</string>
+    <string name="btn_x11_run">运行</string>
+    <string name="btn_x11_only">仅启动服务端</string>
+    <string name="btn_browser">浏览器</string>
+    <string name="btn_x11">X11</string>
+    <string name="x11_starting">正在启动 termux-x11 并设置 DISPLAY=:0 ...</string>
+    <string name="x11_started">termux-x11 已启动，DISPLAY=:0 已设置</string>
+    <string name="x11_install_start">termux-x11 未安装，请前往浏览器页面手动下载安装...</string>
+    <string name="x11_install_done">termux-x11 已安装</string>
+    <string name="x11_install_failed">termux-x11 安装失败: %1$s</string>
+    <string name="x11_launch_failed">无法启动 termux-x11: %1$s</string>
+    <string name="x11_busy">正在启动 termux-x11，请稍候...</string>
+    <string name="terminal_x11_hint">X11 会话: DISPLAY=:0（点左上角 X11 可唤起服务端）</string>
+
+    <!-- v26：Material 3 外观设置（用户可自定义颜色） -->
+    <string name="theme_title">外观设置</string>
+    <string name="theme_mode_label">模式</string>
+    <string name="theme_mode_system">跟随系统</string>
+    <string name="theme_mode_light">浅色</string>
+    <string name="theme_mode_dark">深色</string>
+    <string name="theme_seed_label">主题色</string>
+    <string name="theme_seed_custom">自定义颜色（HEX）</string>
+    <string name="theme_seed_apply">应用</string>
+    <string name="theme_seed_invalid">无效颜色，请使用 #RRGGBB 格式</string>
+    <string name="theme_done">完成</string>
+
+    <!-- WebTerminalActivity -->
+    <string name="btn_close_terminal">关闭</string>
+    <string name="web_terminal_title">Web终端: %1$s</string>
+
+    <!-- TtydService 前台通知 -->
+    <string name="noti_channel_name">ttyd Web 终端</string>
+    <string name="noti_channel_desc">保持 ttyd 运行，切到浏览器时不会被冻结</string>
+    <string name="noti_title">ttyd 运行中</string>
+    <string name="noti_text">%1$s · %2$s</string>
+
+    <!-- v23：容器重命名 -->
+    <string name="btn_rename">重命名</string>
+    <string name="dialog_rename_title">重命名 RootFS</string>
+    <string name="dialog_rename_hint">输入新名称</string>
+    <string name="msg_renamed">已重命名为 %1$s</string>
+    <string name="msg_rename_failed">重命名失败: %1$s</string>
+
+    <!-- v23（v25 更新）：跨架构模拟（QEMU），tur-packages 版本化包名 -->
+    <string name="qemu_title">跨架构模拟（QEMU）</string>
+    <string name="qemu_desc">选择要模拟的目标架构，启动时自动引导 qemu 模拟器（qemu-user-static）。\ntur-packages 参考包名见各选项。已自动排除与本机架构相同的选项。</string>
+    <string name="qemu_none">不使用跨架构模拟</string>
+    <string name="qemu_x86_64">x86_64 模拟（qemu-user-x86-64-9 · 9.2.4-1）</string>
+    <string name="qemu_i386">i386 模拟（qemu-user-i386-10 · 10.2.1-1）</string>
+    <string name="qemu_arm">ARM 32位模拟（qemu-user-arm-10 · 10.2.1-1）</string>
+    <string name="qemu_aarch64">ARM64 模拟（qemu-user-aarch64-9 · 9.2.4-1）</string>
+    <string name="qemu_m68k">m68k 模拟（qemu-user-m68k-10 · 10.2.1-1）</string>
+    <string name="qemu_ppc">PPC 32位模拟（qemu-user-ppc-10 · 10.2.1-1）</string>
+    <string name="qemu_ppc64">PPC64 模拟（qemu-user-ppc64-9 · 9.2.4-1）</string>
+    <string name="qemu_riscv64">RISC-V 64 模拟（qemu-user-riscv64-9 · 9.2.4-1）</string>
+    <string name="qemu_installing">正在下载并引导 QEMU 用户态模拟器…</string>
+    <string name="qemu_install_done">QEMU 模拟环境已就绪: %1$s</string>
+    <string name="qemu_install_failed">QEMU 引导失败: %1$s</string>
+    <string name="qemu_current_status">当前跨架构: %1$s</string>
+
+    <!-- v24/v25：真实模拟（Tiny Container）→ 运行带有容器检测的二进制 -->
+    <string name="real_sim_label">运行带有容器检测的二进制（Tiny Container 启动命令）</string>
+    <string name="real_sim_desc">为容器内的二进制伪造真实容器环境（fake /proc、/sys、selinux 等），绕过后台检测。\n与「跨架构模拟」互不影响，可同时开启。</string>
+    <string name="real_sim_on">已开启：运行带有容器检测的二进制</string>
+    <string name="real_sim_off">已关闭：运行带有容器检测的二进制</string>
+
+    <!-- v23：X11 跳浏览器提示 -->
+    <string name="x11_browser_hint">termux-x11 未安装。已为你打开浏览器下载页面，请手动安装后回到 App 再点 X11。</string>
+</resources>
