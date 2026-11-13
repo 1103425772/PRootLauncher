@@ -366,6 +366,11 @@ public class ProotInstaller {
     private void addQemuArgs(List<String> cmd, File rootfsDir) {
         String qemuArch = SimConfig.getQemuArch(context, rootfsDir.getName());
         if (SimConfig.QEMU_NONE.equals(qemuArch)) return;
+        // v29：32 位宿主无法承载静态 QEMU（proot 只能执行 32 位程序），不注入 -q
+        if (!SimConfig.hostIs64()) {
+            Log.w(TAG, "宿主 32 位 ABI，跳过 -q（无法跨架构模拟）");
+            return;
+        }
         File host = QemuSupport.hostQemu(context, qemuArch);
         if (host == null) {
             Log.w(TAG, "QEMU 架构无对应二进制: " + qemuArch);

@@ -111,9 +111,20 @@ public final class QemuSupport {
             return "模拟器已就绪（宿主静态）: " + host.getAbsolutePath();
         }
 
+        // v29：32 位宿主（armeabi-v7a）拿不到可用的静态 QEMU ——
+        // Debian 没有 armhf 的 qemu-user-static，multiarch 的资产又是 x86_64 宿主
+        // 构建，32 位 proot 也只能处理 32 位程序。直接给出可读的错误，别让用户
+        // 以为是 "not found" 的偶发问题。
+        if (!SimConfig.hostIs64()) {
+            throw new Exception("当前设备是 32 位 ABI（" + android.os.Build.SUPPORTED_ABIS[0]
+                + "）：本方案需要 64 位宿主 proot + 静态 QEMU，\n"
+                + "32 位设备无法跨架构模拟。请改用与本机同架构的 32 位 rootfs，"
+                + "或换用 64 位设备。");
+        }
+
         String debArch = SimConfig.qemuDebArch();
         if (debArch == null) {
-            // 32 位宿主：Debian 无官方 static 包，回退 multiarch
+            // 其余未知宿主：回退 multiarch
             downloadFromMultiarch(ctx, host, bin);
             return "已安装 QEMU 模拟器（multiarch " + QUS_RELEASE + "）: " + host.getAbsolutePath();
         }
@@ -131,6 +142,15 @@ public final class QemuSupport {
         boolean ok = extractTarEntry(deb, entry, host);
         if (!ok || host.length() < 1024L) {
             throw new Exception("从 deb 抽取 " + entry + " 失败（" + deb.getAbsolutePath() + "）");
+        }
+        // v29：ELF 头校验 —— 必须是对应宿主架构的可执行 ELF
+        // （e_machine 183=EM_AARCH64 / 62=EM_X86_64），否则说明包下错了或内容异常。
+        int expectedMachine = SimConfig.hostMachineForElf();
+        if (!isValidElfForHost(host, expectedMachine)) {
+            host.delete();
+            throw new Exception("解出的 QEMU 二进制架构不匹配（期望 ELF machine="
+                + expectedMachine + "）：" + host.getAbsolutePath()
+                + "\n请检查网络代理后重试（deb 可能被截断）。");
         }
         host.setExecutable(true, false);
         Log.i(TAG, "extracted " + entry + " -> " + host.getAbsolutePath()
@@ -219,6 +239,25 @@ public final class QemuSupport {
             }
         } finally {
             if (conn != null) conn.disconnect();
+        }
+    }
+
+    // ================================================================
+    // ELF 校验
+    // ================================================================
+
+    /** 读出 ELF 头，校验魔数 + e_machine + 64 位标志 */
+    private static boolean isValidElfForHost(File f, int expectedMachine) {
+        try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(f, "r")) {
+            if (raf.length() < 64) return false;
+            byte[] h = new byte[64];
+            raf.readFully(h);
+            if (h[0] != 0x7F || h[1] != 'E' || h[2] != 'L' || h[3] != 'F') return false;
+            if (h[4] != 2) return false;        // EI_CLASS=2 → 64 位
+            int machine = (h[18] & 0xFF) | ((h[19] & 0xFF) << 8); // e_machine 小端
+            return machine == expectedMachine;
+        } catch (IOException e) {
+            return false;
         }
     }
 

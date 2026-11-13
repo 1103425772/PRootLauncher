@@ -1008,18 +1008,23 @@ private fun SecretDialog(activity: MainActivity, dir: File, onDismiss: () -> Uni
     var realSim by remember { mutableStateOf(SimConfig.isRealSim(activity, name)) }
     var qemuArch by remember { mutableStateOf(SimConfig.getQemuArch(activity, name)) }
 
-    val qemuOptions = remember {
-        listOf(
+    val host64 = SimConfig.hostIs64()
+    val qemuOptions = remember(host64, nativeArch) {
+        val all = listOf(
             SimConfig.QEMU_NONE to "不使用跨架构模拟",
-            SimConfig.QEMU_X86_64 to "x86_64 模拟（qemu-user-x86-64-9 · 9.2.4-1）",
-            SimConfig.QEMU_I386 to "i386 模拟（qemu-user-i386-10 · 10.2.1-1）",
-            SimConfig.QEMU_ARM to "ARM 32位模拟（qemu-user-arm-10 · 10.2.1-1）",
-            SimConfig.QEMU_AARCH64 to "ARM64 模拟（qemu-user-aarch64-9 · 9.2.4-1）",
-            SimConfig.QEMU_M68K to "m68k 模拟（qemu-user-m68k-10 · 10.2.1-1）",
-            SimConfig.QEMU_PPC to "PPC 32位模拟（qemu-user-ppc-10 · 10.2.1-1）",
-            SimConfig.QEMU_PPC64 to "PPC64 模拟（qemu-user-ppc64-9 · 9.2.4-1）",
-            SimConfig.QEMU_RISCV64 to "RISC-V 64 模拟（qemu-user-riscv64-9 · 9.2.4-1）",
+            SimConfig.QEMU_X86_64 to "x86_64 模拟（Debian qemu-user-static 7.2）",
+            SimConfig.QEMU_I386 to "i386 模拟（Debian qemu-user-static 7.2）",
+            SimConfig.QEMU_ARM to "ARM 32位模拟（Debian qemu-user-static 7.2）",
+            SimConfig.QEMU_AARCH64 to "ARM64 模拟（Debian qemu-user-static 7.2）",
+            SimConfig.QEMU_M68K to "m68k 模拟（Debian qemu-user-static 7.2）",
+            SimConfig.QEMU_PPC to "PPC 32位模拟（Debian qemu-user-static 7.2）",
+            SimConfig.QEMU_PPC64 to "PPC64 模拟（Debian qemu-user-static 7.2）",
+            SimConfig.QEMU_RISCV32 to "RISC-V 32 模拟（Debian qemu-user-static 7.2）",
+            SimConfig.QEMU_RISCV64 to "RISC-V 64 模拟（Debian qemu-user-static 7.2）",
         ).filter { it.first == SimConfig.QEMU_NONE || it.first != nativeArch }
+        // v29：32 位 ABI 设备没有可用的静态 QEMU，只保留「不使用」，
+        // 避免用户选了之后启动失败却不知道原因。
+        if (host64) all else all.filter { it.first == SimConfig.QEMU_NONE }
     }
 
     BaseDialog(
@@ -1044,6 +1049,15 @@ private fun SecretDialog(activity: MainActivity, dir: File, onDismiss: () -> Uni
 
         // 跨架构模拟（QEMU）
         Text(activity.getString(R.string.qemu_title), style = MaterialTheme.typography.titleSmall)
+        if (!host64) {
+            Spacer(Modifier.height(2.dp))
+            Text(
+                "当前设备为 32 位 ABI（${android.os.Build.SUPPORTED_ABIS[0]}），跨架构模拟不可用："
+                    + "32 位 proot 只能执行 32 位程序，且无 32 位静态 QEMU。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
         Spacer(Modifier.height(4.dp))
         Column(
             verticalArrangement = Arrangement.spacedBy(6.dp),

@@ -12,8 +12,8 @@ android {
     defaultConfig {
         applicationId = "com.proot.launcher"
         minSdk = 24
-        versionCode = 39
-        versionName = "1.13.1-v28"
+        versionCode = 40
+        versionName = "1.13.2-v29"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
 

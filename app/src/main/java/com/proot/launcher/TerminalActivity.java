@@ -179,9 +179,20 @@ public class TerminalActivity extends Activity {
         // 默认交互 shell（v19 方案）：rootfs 的 /bin/sh，其次 bash/zsh
         String shell = installer.defaultShellPath(rootfsDir);
 
-        // Diagnose: check if shell exists and is executable
+        // Diagnose: 判断 shell 是否可用
+        // v29：/bin/sh 在很多 rootfs（alpine / debian bootstrap）里是指向 busybox 的
+        // 符号链接，File.exists() 会在宿主文件系统里解析绝对链接（/bin/busybox
+        // 在宿主上当然不存在）从而误报「rootfs 解压不完整」。这里用
+        // NOFOLLOW_LINKS 判断链接本身，并把 busybox 存在作为兜底。
         File shellFile = new File(rootfsDir, shell.substring(1)); // remove leading /
-        if (!shellFile.exists()) {
+        boolean shellLinkExists = false;
+        try {
+            shellLinkExists = java.nio.file.Files.exists(
+                shellFile.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS);
+        } catch (Exception ignored) { }
+        boolean busyboxExists = new File(rootfsDir, "bin/busybox").isFile()
+            || new File(rootfsDir, "usr/bin/busybox").isFile();
+        if (!shellLinkExists && !busyboxExists) {
             appendOutput("[诊断] " + shell + " 不存在！rootfs 可能解压不完整。\n");
             appendOutput("[诊断] rootfs 路径: " + rootfsDir.getAbsolutePath() + "\n");
             appendOutput("[诊断] 请删除此 rootfs 后重新下载解压。\n");
@@ -199,13 +210,15 @@ public class TerminalActivity extends Activity {
                     appendOutput(sb.toString() + "\n");
                 }
             }
-        } else if (!shellFile.canExecute()) {
+        } else if (!busyboxExists && !shellFile.canExecute()) {
             appendOutput("[诊断] " + shell + " 存在但没有执行权限！\n");
             appendOutput("[诊断] 这是旧版解压的 rootfs，文件权限未正确设置。\n");
             appendOutput("[诊断] 请删除此 rootfs 后重新下载解压（新版已修复权限问题）。\n");
             // Try to fix permissions
             shellFile.setExecutable(true, false);
             appendOutput("[诊断] 已尝试自动修复 " + shell + " 的执行权限。\n");
+        } else if (shellLinkExists && !shellFile.canExecute()) {
+            appendOutput("[诊断] " + shell + " 是符号链接（宿主侧不解析，容器内指向 busybox），视为可用。\n");
         } else {
             appendOutput("[诊断] " + shell + " 存在且有执行权限。\n");
         }
@@ -251,7 +264,18 @@ public class TerminalActivity extends Activity {
         try {
             // v25：跨架构模拟（真实模拟）——先确保 qemu 模拟器可用
             String qemuArch = SimConfig.getQemuArch(this, rootfsName);
-            if (!SimConfig.QEMU_NONE.equals(qemuArch)) {
+            if (!SimConfig.QEMU_NONE.equals(qemuArch) && !SimConfig.hostIs64()) {
+                // v29：32 位宿主上的 proot 只能执行 32 位程序，且没有可用的
+                // 32 位静态 QEMU —— 提前说清楚，避免出现
+                // "'/bin/busybox' is a 64-bit program whereas this version of proot
+                //  handles 32-bit programs only" 这种难懂的报错。
+                appendOutput("[QEMU] 当前设备为 32 位 ABI（"
+                    + Build.SUPPORTED_ABIS[0] + "），无法跨架构模拟。\n");
+                appendOutput("[QEMU] 原因：32 位 proot 只能执行 32 位程序，且没有 32 位静态 QEMU 可用。\n");
+                appendOutput("[QEMU] 请把该容器的「跨架构模拟」设为「不使用」，"
+                    + "并改用与本机同架构（arm 32 位）的 rootfs。\n");
+                appendOutput("[QEMU] 本次已忽略 -q 参数继续启动（预计仍会失败）。\n");
+            } else if (!SimConfig.QEMU_NONE.equals(qemuArch)) {
                 appendOutput("[QEMU] 跨架构模拟: " + qemuArch
                     + "（Debian qemu-user-static " + SimConfig.qemuPkgVersion(qemuArch)
                     + " " + SimConfig.qemuPkgArch() + "）\n");

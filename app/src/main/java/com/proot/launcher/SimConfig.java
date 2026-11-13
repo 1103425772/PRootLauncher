@@ -160,6 +160,25 @@ public final class SimConfig {
         return null;
     }
 
+    /**
+     * 宿主是否为 64 位 ABI（arm64-v8a / x86_64）。
+     * v29：32 位宿主（armeabi-v7a）上的 proot 只能处理 32 位程序，
+     * 缺 32 位静态 QEMU，跨架构模拟直接不可用 —— 启动前要拦住。
+     */
+    public static boolean hostIs64() {
+        String[] abis = android.os.Build.SUPPORTED_ABIS;
+        if (abis == null || abis.length == 0) return true;
+        String abi = abis[0].toLowerCase();
+        return abi.contains("arm64") || abi.contains("aarch64") || abi.contains("x86_64");
+    }
+
+    /** 宿主 ELF 机器码：183 = EM_AARCH64，62 = EM_X86_64（用于校验解出的 QEMU） */
+    public static int hostMachineForElf() {
+        String a = qemuDebArch();
+        if ("amd64".equals(a)) return 62;
+        return 183;
+    }
+
     /** 该 rootfs 的 QEMU 模拟架构（默认 none） */
     public static String getQemuArch(Context ctx, String rootfsName) {
         if (rootfsName == null) return QEMU_NONE;
