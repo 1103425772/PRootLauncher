@@ -253,18 +253,19 @@ public class TerminalActivity extends Activity {
             String qemuArch = SimConfig.getQemuArch(this, rootfsName);
             if (!SimConfig.QEMU_NONE.equals(qemuArch)) {
                 appendOutput("[QEMU] 跨架构模拟: " + qemuArch
-                    + "（tur-packages: " + SimConfig.qemuPkgName(qemuArch) + " "
-                    + SimConfig.qemuPkgVersion(qemuArch) + " " + SimConfig.qemuPkgArch() + "）\n");
-                if (!QemuSupport.isQemuInstalled(canonicalRootfs, qemuArch)) {
-                    appendOutput("[QEMU] 模拟器缺失，正在自动引导 qemu-user-static...\n");
+                    + "（Debian qemu-user-static " + SimConfig.qemuPkgVersion(qemuArch)
+                    + " " + SimConfig.qemuPkgArch() + "）\n");
+                if (!QemuSupport.isHostReady(this, qemuArch)) {
+                    appendOutput("[QEMU] 宿主静态模拟器缺失，正在从 Debian 官方仓库下载引导...\n");
                     try {
                         appendOutput("[QEMU] " + QemuSupport.ensureInstalled(this, canonicalRootfs, qemuArch) + "\n");
                     } catch (Exception e) {
                         appendOutput("[QEMU] 自动引导失败: " + e.getMessage()
-                            + "\n[QEMU] 请手动在 rootfs 内安装 qemu-user（Debian: apt install qemu-user）\n");
+                            + "\n[QEMU] 可在 rootfs 内手动安装（Debian: apt install qemu-user）\n");
                     }
                 } else {
-                    appendOutput("[QEMU] 模拟器已就绪: " + QemuSupport.resolveQemuBin(canonicalRootfs, qemuArch) + "\n");
+                    File hq = QemuSupport.hostQemu(this, qemuArch);
+                    appendOutput("[QEMU] 静态模拟器已就绪: " + (hq == null ? "?" : hq.getAbsolutePath()) + "\n");
                 }
             }
 

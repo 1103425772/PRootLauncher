@@ -244,6 +244,10 @@ public class ProotInstaller {
 
     public String[] buildEnv() {
         List<String> envList = new ArrayList<>();
+        // v28：必须有宿主 PATH —— TerminalActivity 里 environment().clear() 后
+        // 子进程没有 PATH，proot 会报 `$PATH=(null)` 并按空 PATH 查找可执行文件
+        // （跨架构时即 "qemu-x86_64-static not found"）。这里注入宿主 PATH 兜底。
+        envList.add("PATH=" + binDir.getAbsolutePath() + ":/system/bin:/system/xbin:/vendor/bin");
         envList.add("LD_LIBRARY_PATH=" + libDir.getAbsolutePath() + ":" + nativeLibDir.getAbsolutePath());
         envList.add("PROOT_LOADER=" + getLoader().getAbsolutePath());
         envList.add("PROOT_TMP_DIR=" + tmpDir.getAbsolutePath());
@@ -349,21 +353,32 @@ public class ProotInstaller {
     }
 
     /**
-     * v25：跨架构模拟 QEMU 前缀（真实模拟）。
+     * v28：跨架构模拟 —— proot 的 `-q <QEMU 绝对路径>`。
      *
-     * 返回如 "qemu-x86_64 -L /usr/x86_64-linux-gnu " 或
-     * "qemu-x86_64-static -L /usr/x86_64-linux-gnu "（自动引导的静态模拟器）。
-     * 二进制名按 rootfs 内实际存在情况解析（普通名优先，-static 兜底），
-     * 缺失时返回 ""（由调用方先跑 QemuSupport.ensureInstalled 引导）。
+     * v25 把 "qemu-x86_64-static -L /usr/..." 当作 proot 之后的 argv 命令名，
+     * 由容器内 shell 去执行，容器 PATH 为空时 proot 直接报
+     *   `'qemu-x86_64-static' not found (..., $PATH=(null))`
+     * 而 multiarch 的静态包又是 x86_64 宿主构建，arm64 设备执行不了。
+     *
+     * v28 改用 proot 自带的 -q 机制：qemu 由 proot 在宿主侧调用（绝对路径），
+     * 透明的接管容器内每个 execve，不依赖容器 PATH，也不需要 guest 侧 -L。
      */
-    private String qemuPrefix(File rootfsDir) {
+    private void addQemuArgs(List<String> cmd, File rootfsDir) {
         String qemuArch = SimConfig.getQemuArch(context, rootfsDir.getName());
-        if (SimConfig.QEMU_NONE.equals(qemuArch)) return "";
-        String qemuBin = QemuSupport.resolveQemuBin(rootfsDir, qemuArch);
-        if (qemuBin == null) return "";
-        String prefix = qemuBin + " -L " + SimConfig.qemuLdPrefix(qemuArch) + " ";
-        Log.i(TAG, "QEMU sim: " + qemuArch + " -> " + prefix);
-        return prefix;
+        if (SimConfig.QEMU_NONE.equals(qemuArch)) return;
+        File host = QemuSupport.hostQemu(context, qemuArch);
+        if (host == null) {
+            Log.w(TAG, "QEMU 架构无对应二进制: " + qemuArch);
+            return;
+        }
+        if (!host.isFile()) {
+            Log.w(TAG, "QEMU 静态模拟器缺失（应先 ensureInstalled）: " + host.getAbsolutePath());
+            return;
+        }
+        host.setExecutable(true, false);
+        cmd.add("-q");
+        cmd.add(host.getAbsolutePath());
+        Log.i(TAG, "QEMU sim: " + qemuArch + " -> -q " + host.getAbsolutePath());
     }
 
     /**
@@ -422,12 +437,12 @@ public class ProotInstaller {
      * v25：把 QEMU 前缀拆成 argv token 插入 cmd（proot 之后、/bin/sh 之前）。
      * 前缀形如 "qemu-x86_64-static -L /usr/x86_64-linux-gnu"。
      */
+    /**
+     * v28：兼容旧调用点 —— 等价 addQemuArgs（输出 proot 的 "-q <abs>" 两个 token），
+     * 不再把 qemu 作为 argv 命令前缀。
+     */
     private void addQemuTokens(List<String> cmd, File rootfsDir) {
-        String qemuPrefix = qemuPrefix(rootfsDir);
-        if (qemuPrefix == null || qemuPrefix.isEmpty()) return;
-        for (String tok : qemuPrefix.trim().split("\\s+")) {
-            if (!tok.isEmpty()) cmd.add(tok);
-        }
+        addQemuArgs(cmd, rootfsDir);
     }
 
     /**

@@ -142,6 +142,23 @@ public final class SimConfig {
     public static final String QEMU_PPC = "ppc";
     public static final String QEMU_PPC64 = "ppc64";
     public static final String QEMU_RISCV64 = "riscv64";
+    public static final String QEMU_RISCV32 = "riscv32";
+
+    /** Debian 12 (bookworm) 官方 qemu-user-static 包版本 */
+    public static final String QEMU_DEB_VERSION = "7.2+dfsg-7+deb12u18+b3";
+
+    /**
+     * 宿主设备架构对应的 Debian 包架构。
+     * arm64 设备 → arm64；x86_64 设备 → amd64；
+     * 32 位 arm/x86 宿主 Debian 未提供 static 包，返回 null（走 multiarch 回退）。
+     */
+    public static String qemuDebArch() {
+        String[] abis = android.os.Build.SUPPORTED_ABIS;
+        String abi = (abis != null && abis.length > 0) ? abis[0].toLowerCase() : "arm64-v8a";
+        if (abi.contains("arm64") || abi.contains("aarch64")) return "arm64";
+        if (abi.contains("x86_64")) return "amd64";
+        return null;
+    }
 
     /** 该 rootfs 的 QEMU 模拟架构（默认 none） */
     public static String getQemuArch(Context ctx, String rootfsName) {
@@ -207,34 +224,24 @@ public final class SimConfig {
      * qemu-user 包（Debian/Ubuntu: apt install qemu-user，二进制名一致）。
      */
     public static String qemuPkgName(String arch) {
-        if (QEMU_X86_64.equals(arch)) return "qemu-user-x86-64-9";
-        if (QEMU_AARCH64.equals(arch)) return "qemu-user-aarch64-9";
-        if (QEMU_PPC64.equals(arch)) return "qemu-user-ppc64-9";
-        if (QEMU_RISCV64.equals(arch)) return "qemu-user-riscv64-9";
-        if (QEMU_ARM.equals(arch)) return "qemu-user-arm-10";
-        if (QEMU_I386.equals(arch)) return "qemu-user-i386-10";
-        if (QEMU_M68K.equals(arch)) return "qemu-user-m68k-10";
-        if (QEMU_PPC.equals(arch)) return "qemu-user-ppc-10";
-        return null;
+        if (qemuBinName(arch) == null) return null;
+        return "qemu-user-static";
     }
 
-    /** tur 包里的 QEMU 大版本号（-9 = QEMU 9.x，-10 = QEMU 10.x） */
+    /** 安装来源的大版本（Debian 12 官方包：QEMU 7.2） */
     public static String qemuMajor(String arch) {
-        if (QEMU_X86_64.equals(arch) || QEMU_AARCH64.equals(arch)
-                || QEMU_PPC64.equals(arch) || QEMU_RISCV64.equals(arch)) return "9";
-        if (QEMU_ARM.equals(arch) || QEMU_I386.equals(arch)
-                || QEMU_M68K.equals(arch) || QEMU_PPC.equals(arch)) return "10";
-        return "9";
+        return "7.2";
     }
 
-    /** tur 包版本（9.2.4-1 / 10.2.1-1） */
+    /** 包版本（Debian bookworm 官方包版本） */
     public static String qemuPkgVersion(String arch) {
-        return "9".equals(qemuMajor(arch)) ? "9.2.4-1" : "10.2.1-1";
+        return QEMU_DEB_VERSION;
     }
 
-    /** tur 包架构（这些 tur 构建在 32 位 ARM 上跑，可模拟 64 位 guest） */
+    /** 包架构：随宿主 ABI（arm64 / amd64），32 位宿主回退 multiarch */
     public static String qemuPkgArch() {
-        return "arm";
+        String a = qemuDebArch();
+        return a == null ? "armhf(multiarch)" : a;
     }
 
     /** QEMU 二进制名映射（rootfs 里 /usr/bin/qemu-xxx，tur 包里 bin/qemu-xxx） */
@@ -247,6 +254,7 @@ public final class SimConfig {
         if (QEMU_PPC.equals(arch)) return "qemu-ppc";
         if (QEMU_PPC64.equals(arch)) return "qemu-ppc64";
         if (QEMU_RISCV64.equals(arch)) return "qemu-riscv64";
+        if (QEMU_RISCV32.equals(arch)) return "qemu-riscv32";
         return null;
     }
 
@@ -264,6 +272,7 @@ public final class SimConfig {
         if (QEMU_PPC.equals(arch)) return "/usr/powerpc-linux-gnu";
         if (QEMU_PPC64.equals(arch)) return "/usr/powerpc64-linux-gnu";
         if (QEMU_RISCV64.equals(arch)) return "/usr/riscv64-linux-gnu";
+        if (QEMU_RISCV32.equals(arch)) return "/usr/riscv32-linux-gnu";
         return "/";
     }
 }
