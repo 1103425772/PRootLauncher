@@ -1022,9 +1022,10 @@ private fun SecretDialog(activity: MainActivity, dir: File, onDismiss: () -> Uni
             SimConfig.QEMU_RISCV32 to "RISC-V 32 模拟（内置 qemu-user 11.1.3）",
             SimConfig.QEMU_RISCV64 to "RISC-V 64 模拟（内置 qemu-user 11.1.3）",
         ).filter { it.first == SimConfig.QEMU_NONE || it.first != nativeArch }
-        // v29：32 位 ABI 设备没有可用的静态 QEMU，只保留「不使用」，
-        // 避免用户选了之后启动失败却不知道原因。
-        if (host64) all else all.filter { it.first == SimConfig.QEMU_NONE }
+        // v31：32 位设备只保留 32 位目标架构（内置的是 arm 版 qemu，
+        // 64 位 guest 在 32 位宿主上跑不动）
+        if (host64) all
+        else all.filter { it.first == SimConfig.QEMU_NONE || !SimConfig.qemuTargetIs64(it.first) }
     }
 
     BaseDialog(
@@ -1052,10 +1053,10 @@ private fun SecretDialog(activity: MainActivity, dir: File, onDismiss: () -> Uni
         if (!host64) {
             Spacer(Modifier.height(2.dp))
             Text(
-                "当前设备为 32 位 ABI（${android.os.Build.SUPPORTED_ABIS[0]}），跨架构模拟不可用："
-                    + "32 位 proot 只能执行 32 位程序，且无 32 位静态 QEMU。",
+                "当前设备为 32 位 ABI（${android.os.Build.SUPPORTED_ABIS[0]}），"
+                    + "仅支持 32 位目标架构：i386 / arm / m68k / ppc / riscv32。",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         Spacer(Modifier.height(4.dp))

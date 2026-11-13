@@ -193,16 +193,18 @@ public final class QemuSupport {
                 + "（" + (host.length() / (1024 * 1024)) + " MB）";
         }
 
-        // 32 位宿主：内置目录里没有 arm 版，且没有可用的 32 位静态 QEMU
-        if (!SimConfig.hostIs64()) {
+        // 32 位宿主：内置 arm 版只有 32 位 guest 模拟器，
+        // 若用户选了 64 位目标架构则明确说明（其余情况照常启动）
+        if (!SimConfig.hostIs64() && SimConfig.qemuTargetIs64(arch)) {
             throw new Exception("当前设备是 32 位 ABI（" + android.os.Build.SUPPORTED_ABIS[0]
-                + "）：内置模拟器只有 64 位（arm64）版本，32 位 proot 也无法执行它。\n"
-                + "请把该容器的「跨架构模拟」设为「不使用」，改用同架构 rootfs。");
+                + "），无法模拟 64 位目标架构 " + arch + "。\n"
+                + "32 位设备可用：i386 / arm / m68k / ppc / riscv32。");
         }
 
         throw new Exception("未找到内置模拟器: " + bin
+            + "\n当前 ABI: " + android.os.Build.SUPPORTED_ABIS[0]
             + "\n内置目录: " + builtinBinDir(ctx).getAbsolutePath()
-            + "\nAPK 可能损坏或该架构未打包，请重新安装完整版。");
+            + "\nAPK 可能损坏，请重新安装完整版。");
     }
 
     // ================================================================

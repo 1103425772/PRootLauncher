@@ -179,6 +179,24 @@ public final class SimConfig {
         return 183;
     }
 
+    /**
+     * 目标架构是否需要 64 位 guest 支持。
+     * 32 位宿主（arm）上，qemu 只能安全承载 32 位 guest：
+     * x86_64 / aarch64 / ppc64 / riscv64 需要 64 位地址空间，32 位宿主下不保证能跑。
+     */
+    public static boolean qemuTargetIs64(String arch) {
+        if (arch == null) return false;
+        switch (arch) {
+            case QEMU_X86_64:
+            case QEMU_AARCH64:
+            case QEMU_PPC64:
+            case QEMU_RISCV64:
+                return true;
+            default:
+                return false;
+        }
+    }
+
     /** 该 rootfs 的 QEMU 模拟架构（默认 none） */
     public static String getQemuArch(Context ctx, String rootfsName) {
         if (rootfsName == null) return QEMU_NONE;

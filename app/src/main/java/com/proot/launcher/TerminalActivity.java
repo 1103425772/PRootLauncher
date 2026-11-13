@@ -264,16 +264,11 @@ public class TerminalActivity extends Activity {
         try {
             // v25：跨架构模拟（真实模拟）——先确保 qemu 模拟器可用
             String qemuArch = SimConfig.getQemuArch(this, rootfsName);
-            if (!SimConfig.QEMU_NONE.equals(qemuArch) && !SimConfig.hostIs64()) {
-                // v29：32 位宿主上的 proot 只能执行 32 位程序，且没有可用的
-                // 32 位静态 QEMU —— 提前说清楚，避免出现
-                // "'/bin/busybox' is a 64-bit program whereas this version of proot
-                //  handles 32-bit programs only" 这种难懂的报错。
+            if (!SimConfig.QEMU_NONE.equals(qemuArch)
+                    && !SimConfig.hostIs64() && SimConfig.qemuTargetIs64(qemuArch)) {
                 appendOutput("[QEMU] 当前设备为 32 位 ABI（"
-                    + Build.SUPPORTED_ABIS[0] + "），无法跨架构模拟。\n");
-                appendOutput("[QEMU] 原因：32 位 proot 只能执行 32 位程序，且没有 32 位静态 QEMU 可用。\n");
-                appendOutput("[QEMU] 请把该容器的「跨架构模拟」设为「不使用」，"
-                    + "并改用与本机同架构（arm 32 位）的 rootfs。\n");
+                    + Build.SUPPORTED_ABIS[0] + "），无法模拟 64 位目标架构 " + qemuArch + "。\n");
+                appendOutput("[QEMU] 32 位设备可用：i386 / arm / m68k / ppc / riscv32。\n");
                 appendOutput("[QEMU] 本次已忽略 -q 参数继续启动（预计仍会失败）。\n");
             } else if (!SimConfig.QEMU_NONE.equals(qemuArch)) {
                 appendOutput("[QEMU] 跨架构模拟: " + qemuArch
