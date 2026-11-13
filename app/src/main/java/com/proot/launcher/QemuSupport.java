@@ -1,6 +1,7 @@
 package com.proot.launcher;
 
 import android.content.Context;
+import android.content.res.AssetManager;
 import android.util.Log;
 
 import org.tukaani.xz.XZInputStream;
@@ -57,16 +58,93 @@ public final class QemuSupport {
 
     private QemuSupport() {}
 
-    /** 宿主缓存目录 files/qemu/bin */
+    /** 宿主缓存目录 files/qemu/bin（旧 Debian 静态包解出位置） */
     public static File hostBinDir(Context ctx) {
         return new File(ctx.getFilesDir(), "qemu/bin");
     }
 
-    /** 宿主可执行的静态模拟器：files/qemu/bin/qemu-<arch>-static */
+    /** v30 内置模拟器目录（从 APK assets 部署，离线可用） */
+    public static File builtinDir(Context ctx) {
+        return new File(ctx.getFilesDir(), "qemu/builtin");
+    }
+
+    public static File builtinBinDir(Context ctx) {
+        return new File(builtinDir(ctx), "bin");
+    }
+
+    public static File builtinLibDir(Context ctx) {
+        return new File(builtinDir(ctx), "lib");
+    }
+
+    /**
+     * 把 APK assets/qemu/&lt;abi&gt; 里的 qemu 二进制与依赖库部署到 files/qemu/builtin。
+     * 只复制缺失/大小不符的文件，部署完写 .version 标记，之后启动零 IO。
+     */
+    public static synchronized void deployBuiltin(Context ctx) {
+        String abi = SimConfig.hostIs64() ? "arm64" : "arm";
+        File binDir = builtinBinDir(ctx);
+        File libDir = builtinLibDir(ctx);
+        File marker = new File(builtinDir(ctx), ".version-" + abi);
+        if (marker.isFile()) return;
+        binDir.mkdirs();
+        libDir.mkdirs();
+        try {
+            AssetManager am = ctx.getAssets();
+            copyAssetDir(am, "qemu/" + abi + "/bin", binDir, true);
+            copyAssetDir(am, "qemu/" + abi + "/lib", libDir, false);
+            // 标记写入（内容是 abi，仅作存在性判断）
+            FileOutputStream fos = new FileOutputStream(marker);
+            fos.write(abi.getBytes());
+            fos.close();
+            Log.i(TAG, "内置模拟器部署完成: " + builtinDir(ctx).getAbsolutePath());
+        } catch (Exception e) {
+            Log.w(TAG, "内置模拟器部署失败: " + e.getMessage());
+        }
+    }
+
+    private static void copyAssetDir(AssetManager am, String assetPath, File destDir,
+                                     boolean executable) throws IOException {
+        destDir.mkdirs();
+        String[] list = am.list(assetPath);
+        if (list == null) return;
+        for (String name : list) {
+            String sub = assetPath + "/" + name;
+            String[] subList = am.list(sub);
+            if (subList != null && subList.length > 0) {
+                copyAssetDir(am, sub, new File(destDir, name), executable);
+                continue;
+            }
+            File out = new File(destDir, name);
+            InputStream in = am.open(sub);
+            try {
+                FileOutputStream os = new FileOutputStream(out);
+                try {
+                    byte[] buf = new byte[8192];
+                    int n;
+                    while ((n = in.read(buf)) > 0) os.write(buf, 0, n);
+                } finally {
+                    os.close();
+                }
+            } finally {
+                in.close();
+            }
+            if (executable) {
+                out.setExecutable(true, false);
+                out.setReadable(true, true);
+            }
+        }
+    }
+
+    /** 宿主可执行的模拟器：优先内置 files/qemu/builtin/bin/qemu-&lt;arch&gt; */
     public static File hostQemu(Context ctx, String arch) {
         String bin = SimConfig.qemuBinName(arch);
         if (bin == null) return null;
-        return new File(hostBinDir(ctx), bin + "-static");
+        File builtin = new File(builtinBinDir(ctx), bin);
+        if (builtin.isFile() && builtin.length() > 1024L) return builtin;
+        // 兼容旧版：Debian static 包解出的 qemu-<arch>-static
+        File legacy = new File(hostBinDir(ctx), bin + "-static");
+        if (legacy.isFile() && legacy.length() > 1024L) return legacy;
+        return builtin;
     }
 
     /** 宿主侧静态模拟器是否已就绪（存在 / 体积合理 / 可执行） */
@@ -105,75 +183,26 @@ public final class QemuSupport {
         String bin = SimConfig.qemuBinName(arch);
         if (bin == null) throw new Exception("不支持的架构: " + arch);
 
+        // v30：模拟器全部内置（APK assets），部署一次即可 —— 不再联网下载 Debian
+        deployBuiltin(ctx);
+
         File host = hostQemu(ctx, arch);
         if (host == null) throw new Exception("无法解析模拟器路径: " + arch);
         if (isHostReady(ctx, arch)) {
-            return "模拟器已就绪（宿主静态）: " + host.getAbsolutePath();
+            return "内置模拟器已就绪: " + host.getAbsolutePath()
+                + "（" + (host.length() / (1024 * 1024)) + " MB）";
         }
 
-        // v29：32 位宿主（armeabi-v7a）拿不到可用的静态 QEMU ——
-        // Debian 没有 armhf 的 qemu-user-static，multiarch 的资产又是 x86_64 宿主
-        // 构建，32 位 proot 也只能处理 32 位程序。直接给出可读的错误，别让用户
-        // 以为是 "not found" 的偶发问题。
+        // 32 位宿主：内置目录里没有 arm 版，且没有可用的 32 位静态 QEMU
         if (!SimConfig.hostIs64()) {
             throw new Exception("当前设备是 32 位 ABI（" + android.os.Build.SUPPORTED_ABIS[0]
-                + "）：本方案需要 64 位宿主 proot + 静态 QEMU，\n"
-                + "32 位设备无法跨架构模拟。请改用与本机同架构的 32 位 rootfs，"
-                + "或换用 64 位设备。");
+                + "）：内置模拟器只有 64 位（arm64）版本，32 位 proot 也无法执行它。\n"
+                + "请把该容器的「跨架构模拟」设为「不使用」，改用同架构 rootfs。");
         }
 
-        String debArch = SimConfig.qemuDebArch();
-        if (debArch == null) {
-            // 其余未知宿主：回退 multiarch
-            downloadFromMultiarch(ctx, host, bin);
-            return "已安装 QEMU 模拟器（multiarch " + QUS_RELEASE + "）: " + host.getAbsolutePath();
-        }
-
-        // Debian 官方包缓存 files/qemu/pkg/
-        File pkgDir = new File(ctx.getFilesDir(), "qemu/pkg");
-        pkgDir.mkdirs();
-        File deb = new File(pkgDir, "qemu-user-static_" + SimConfig.QEMU_DEB_VERSION
-            + "_" + debArch + ".deb");
-        if (!deb.isFile() || deb.length() < 1024L * 1024L) {
-            downloadDeb(debArch, deb);
-        }
-
-        String entry = "./usr/bin/" + bin + "-static";
-        boolean ok = extractTarEntry(deb, entry, host);
-        if (!ok || host.length() < 1024L) {
-            throw new Exception("从 deb 抽取 " + entry + " 失败（" + deb.getAbsolutePath() + "）");
-        }
-        // v29：ELF 头校验 —— 必须是对应宿主架构的可执行 ELF
-        // （e_machine 183=EM_AARCH64 / 62=EM_X86_64），否则说明包下错了或内容异常。
-        int expectedMachine = SimConfig.hostMachineForElf();
-        if (!isValidElfForHost(host, expectedMachine)) {
-            host.delete();
-            throw new Exception("解出的 QEMU 二进制架构不匹配（期望 ELF machine="
-                + expectedMachine + "）：" + host.getAbsolutePath()
-                + "\n请检查网络代理后重试（deb 可能被截断）。");
-        }
-        host.setExecutable(true, false);
-        Log.i(TAG, "extracted " + entry + " -> " + host.getAbsolutePath()
-            + " (" + host.length() + " bytes)");
-
-        // 顺手复制一份进 rootfs /usr/bin（容器内可直接调用/便于用户排查）
-        try {
-            File guestBinDir = new File(rootfsDir, "usr/bin");
-            guestBinDir.mkdirs();
-            File guestBin = new File(guestBinDir, bin + "-static");
-            if (!guestBin.isFile() || guestBin.length() != host.length()) {
-                copyFile(host, guestBin);
-            }
-            guestBin.setExecutable(true, false);
-        } catch (Exception e) {
-            Log.w(TAG, "copy into rootfs failed: " + e.getMessage());
-        }
-
-        return "已自动安装 QEMU 模拟器: " + bin + "-static\n"
-            + "来源: Debian qemu-user-static " + SimConfig.QEMU_DEB_VERSION
-            + " " + debArch + "（官方仓库，static-pie）\n"
-            + "宿主路径: " + host.getAbsolutePath()
-            + "（" + (host.length() / (1024 * 1024)) + " MB）";
+        throw new Exception("未找到内置模拟器: " + bin
+            + "\n内置目录: " + builtinBinDir(ctx).getAbsolutePath()
+            + "\nAPK 可能损坏或该架构未打包，请重新安装完整版。");
     }
 
     // ================================================================

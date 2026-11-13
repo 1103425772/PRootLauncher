@@ -1012,15 +1012,15 @@ private fun SecretDialog(activity: MainActivity, dir: File, onDismiss: () -> Uni
     val qemuOptions = remember(host64, nativeArch) {
         val all = listOf(
             SimConfig.QEMU_NONE to "不使用跨架构模拟",
-            SimConfig.QEMU_X86_64 to "x86_64 模拟（Debian qemu-user-static 7.2）",
-            SimConfig.QEMU_I386 to "i386 模拟（Debian qemu-user-static 7.2）",
-            SimConfig.QEMU_ARM to "ARM 32位模拟（Debian qemu-user-static 7.2）",
-            SimConfig.QEMU_AARCH64 to "ARM64 模拟（Debian qemu-user-static 7.2）",
-            SimConfig.QEMU_M68K to "m68k 模拟（Debian qemu-user-static 7.2）",
-            SimConfig.QEMU_PPC to "PPC 32位模拟（Debian qemu-user-static 7.2）",
-            SimConfig.QEMU_PPC64 to "PPC64 模拟（Debian qemu-user-static 7.2）",
-            SimConfig.QEMU_RISCV32 to "RISC-V 32 模拟（Debian qemu-user-static 7.2）",
-            SimConfig.QEMU_RISCV64 to "RISC-V 64 模拟（Debian qemu-user-static 7.2）",
+            SimConfig.QEMU_X86_64 to "x86_64 模拟（内置 qemu-user 11.1.3）",
+            SimConfig.QEMU_I386 to "i386 模拟（内置 qemu-user 11.1.3）",
+            SimConfig.QEMU_ARM to "ARM 32位模拟（内置 qemu-user 11.1.3）",
+            SimConfig.QEMU_AARCH64 to "ARM64 模拟（内置 qemu-user 11.1.3）",
+            SimConfig.QEMU_M68K to "m68k 模拟（内置 qemu-user 11.1.3）",
+            SimConfig.QEMU_PPC to "PPC 32位模拟（内置 qemu-user 11.1.3）",
+            SimConfig.QEMU_PPC64 to "PPC64 模拟（内置 qemu-user 11.1.3）",
+            SimConfig.QEMU_RISCV32 to "RISC-V 32 模拟（内置 qemu-user 11.1.3）",
+            SimConfig.QEMU_RISCV64 to "RISC-V 64 模拟（内置 qemu-user 11.1.3）",
         ).filter { it.first == SimConfig.QEMU_NONE || it.first != nativeArch }
         // v29：32 位 ABI 设备没有可用的静态 QEMU，只保留「不使用」，
         // 避免用户选了之后启动失败却不知道原因。

@@ -12,30 +12,22 @@ android {
     defaultConfig {
         applicationId = "com.proot.launcher"
         minSdk = 24
-        versionCode = 40
-        versionName = "1.13.2-v29"
+        versionCode = 41
+        versionName = "1.14.0-v30"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
 
-    // hi = targetSdk 34（Android 12+，声明 foregroundServiceType=dataSync）
-    // lo = targetSdk 28（Android 9-11，不声明 dataSync）
+    // v30：只保留 hi（targetSdk 34）。lo（targetSdk 28）已停用 ——
+    // hi 在 Android 9/10/11 上实测可用，继续维护双包没有收益。
     flavorDimensions += "abi"
     productFlavors {
         create("hi") {
             dimension = "abi"
             targetSdk = 34
         }
-        create("lo") {
-            dimension = "abi"
-            targetSdk = 28
-        }
     }
 
     sourceSets {
-        // lo 清单覆盖（去 foregroundServiceType / FGS_DATA_SYNC）
-        getByName("lo") {
-            manifest.srcFile("src/lo/AndroidManifest.xml")
-        }
         getByName("hi") {
             manifest.srcFile("src/hi/AndroidManifest.xml")
         }

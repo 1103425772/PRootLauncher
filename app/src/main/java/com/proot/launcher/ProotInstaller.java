@@ -248,7 +248,12 @@ public class ProotInstaller {
         // 子进程没有 PATH，proot 会报 `$PATH=(null)` 并按空 PATH 查找可执行文件
         // （跨架构时即 "qemu-x86_64-static not found"）。这里注入宿主 PATH 兜底。
         envList.add("PATH=" + binDir.getAbsolutePath() + ":/system/bin:/system/xbin:/vendor/bin");
-        envList.add("LD_LIBRARY_PATH=" + libDir.getAbsolutePath() + ":" + nativeLibDir.getAbsolutePath());
+        // v30：内置 qemu 是 bionic 动态二进制（termux 11.1.3 拆分包），
+        // 依赖的 libglib/libgnutls/libpixman 等一并内置在 files/qemu/builtin/lib，
+        // 这里加进 LD_LIBRARY_PATH 让 proot 的 -q 子进程能找到它们。
+        envList.add("LD_LIBRARY_PATH=" + libDir.getAbsolutePath() + ":"
+            + nativeLibDir.getAbsolutePath() + ":"
+            + QemuSupport.builtinLibDir(context).getAbsolutePath());
         envList.add("PROOT_LOADER=" + getLoader().getAbsolutePath());
         envList.add("PROOT_TMP_DIR=" + tmpDir.getAbsolutePath());
         return envList.toArray(new String[0]);
