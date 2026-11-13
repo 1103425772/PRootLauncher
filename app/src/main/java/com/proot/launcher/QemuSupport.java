@@ -85,12 +85,14 @@ public final class QemuSupport {
         File binDir = builtinBinDir(ctx);
         File libDir = builtinLibDir(ctx);
         File marker = new File(builtinDir(ctx), ".version-" + abi);
-        if (marker.isFile() && builtinMatchesHost(binDir)) return;
+        // v33：二进制改放 jniLibs（nativeLibraryDir，可 execve），
+        // assets 里只剩依赖库，这里只部署 lib
+        if (marker.isFile() && libDir.isDirectory()
+                && libDir.list() != null && libDir.list().length > 0) return;
         binDir.mkdirs();
         libDir.mkdirs();
         try {
             AssetManager am = ctx.getAssets();
-            copyAssetDir(am, "qemu/" + abi + "/bin", binDir, true);
             copyAssetDir(am, "qemu/" + abi + "/lib", libDir, false);
             // 标记写入（内容是 abi，仅作存在性判断）
             FileOutputStream fos = new FileOutputStream(marker);
@@ -139,6 +141,13 @@ public final class QemuSupport {
     public static File hostQemu(Context ctx, String arch) {
         String bin = SimConfig.qemuBinName(arch);
         if (bin == null) return null;
+        // v33：优先用 nativeLibraryDir 里的 libqemu_<arch>.so
+        // Android 10+ 不允许从 files/ 里 execve（W^X），这条路径才能真的执行
+        String libName = SimConfig.qemuLibName(arch);
+        if (libName != null) {
+            File nat = new File(ctx.getApplicationInfo().nativeLibraryDir, libName);
+            if (nat.isFile() && nat.length() > 1024L) return nat;
+        }
         File builtin = new File(builtinBinDir(ctx), bin);
         if (builtin.isFile() && builtin.length() > 1024L) return builtin;
         // 兼容旧版：Debian static 包解出的 qemu-<arch>-static

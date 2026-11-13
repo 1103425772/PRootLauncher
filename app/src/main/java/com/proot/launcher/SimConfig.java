@@ -363,6 +363,19 @@ public final class SimConfig {
     }
 
     /**
+     * v33：QEMU 在 APK 内的库名（jniLibs → nativeLibraryDir）。
+     * Android 10+ SELinux 禁止从 app 数据目录 execve 可写文件（W^X），
+     * qemu 放在 files/ 下会 canExecute()=true 但 execve 返回 EACCES
+     * （proot 报 `execve("/bin/sh"): Permission denied`）。
+     * 放进 lib/<abi>/ 才能执行 —— proot 自身也是这么做的（libproot.so）。
+     */
+    public static String qemuLibName(String arch) {
+        String bin = qemuBinName(arch);
+        if (bin == null) return null;
+        return "lib" + bin.replace('-', '_') + ".so";
+    }
+
+    /**
      * guest 动态链接器前缀（-L 参数）。
      * Debian/Ubuntu 风格：/usr/<triplet>；其它发行版可能不同，
      * 可用 files/config/launch.conf 的 boot_command 覆盖。

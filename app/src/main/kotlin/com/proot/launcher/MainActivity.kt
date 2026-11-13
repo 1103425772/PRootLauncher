@@ -38,6 +38,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
@@ -1053,23 +1055,45 @@ private fun SecretDialog(activity: MainActivity, dir: File, onDismiss: () -> Uni
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(4.dp))
-        Column(
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-            modifier = Modifier
-                .verticalScroll(rememberScrollState())
-                .heightIn(max = 320.dp),
-        ) {
-            qemuOptions.forEach { (arch, label) ->
-                Card(
-                    onClick = { qemuArch = arch },
-                    modifier = Modifier.fillMaxWidth(),
+        // v32：改成「当前要跨的框架 ▾」下拉选择（列表可滚动）
+        var qemuMenuOpen by remember { mutableStateOf(false) }
+        val currentQemuLabel = qemuOptions.firstOrNull { it.first == qemuArch }?.second
+            ?: "不使用跨架构模拟"
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Text("当前要跨的框架", Modifier.weight(1f))
+            Box {
+                Card(onClick = { qemuMenuOpen = true }) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    ) {
+                        Text(currentQemuLabel)
+                        Spacer(Modifier.width(8.dp))
+                        Text("▾")
+                    }
+                }
+                DropdownMenu(
+                    expanded = qemuMenuOpen,
+                    onDismissRequest = { qemuMenuOpen = false },
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(8.dp)) {
-                        Text(label, Modifier.weight(1f))
-                        Checkbox(
-                            checked = qemuArch == arch,
-                            onCheckedChange = { qemuArch = arch },
-                        )
+                    Column(
+                        modifier = Modifier
+                            .heightIn(max = 300.dp)
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        qemuOptions.forEach { (arch, label) ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        if (qemuArch == arch) "✓ $label" else "　 $label",
+                                    )
+                                },
+                                onClick = {
+                                    qemuArch = arch
+                                    qemuMenuOpen = false
+                                },
+                            )
+                        }
                     }
                 }
             }
