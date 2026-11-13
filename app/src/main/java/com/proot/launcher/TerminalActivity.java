@@ -264,15 +264,21 @@ public class TerminalActivity extends Activity {
         try {
             // v25：跨架构模拟（真实模拟）——先确保 qemu 模拟器可用
             String qemuArch = SimConfig.getQemuArch(this, rootfsName);
-            if (!SimConfig.QEMU_NONE.equals(qemuArch)
-                    && !SimConfig.hostIs64() && SimConfig.qemuTargetIs64(qemuArch)) {
-                appendOutput("[QEMU] 当前设备为 32 位 ABI（"
-                    + Build.SUPPORTED_ABIS[0] + "），无法模拟 64 位目标架构 " + qemuArch + "。\n");
-                appendOutput("[QEMU] 32 位设备可用：i386 / arm / m68k / ppc / riscv32。\n");
-                appendOutput("[QEMU] 本次已忽略 -q 参数继续启动（预计仍会失败）。\n");
-            } else if (!SimConfig.QEMU_NONE.equals(qemuArch)) {
+            if (!SimConfig.QEMU_NONE.equals(qemuArch)) {
+                // v31：自动校验 rootfs 真实架构，防止模拟器选错
+                // （x86_64 的 rootfs 配 qemu-i386 会直接 execve Permission denied）
+                String realArch = SimConfig.detectRootfsArch(canonicalRootfs);
+                if (realArch != null) {
+                    appendOutput("[诊断] rootfs 实际架构: " + realArch + "\n");
+                    if (!realArch.equals(qemuArch)) {
+                        appendOutput("[诊断] 所选模拟器 " + qemuArch + " 与实际架构不符，已自动切换为 "
+                            + realArch + "\n");
+                        SimConfig.setQemuArch(this, rootfsName, realArch);
+                        qemuArch = realArch;
+                    }
+                }
                 appendOutput("[QEMU] 跨架构模拟: " + qemuArch
-                    + "（内置 termux qemu-user 11.1.3 " + SimConfig.qemuPkgArch() + "）\n");
+                    + "（内置 qemu-user " + SimConfig.qemuPkgArch() + "，离线）\n");
                 if (!QemuSupport.isHostReady(this, qemuArch)) {
                     appendOutput("[QEMU] 正在部署 APK 内置模拟器（无需联网）...\n");
                     try {

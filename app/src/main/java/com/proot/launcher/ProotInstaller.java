@@ -90,6 +90,11 @@ public class ProotInstaller {
         shareDir.mkdirs();
         includeDir.mkdirs();
         tmpDir.mkdirs();
+        // v31：proot 会在 PROOT_TMP_DIR 里建临时目录再 chmod，
+        // 目录缺失/权限不足会报 `can't chmod '…/files/tmp/proot-XXXX-…': No such file`
+        tmpDir.setReadable(true, false);
+        tmpDir.setWritable(true, false);
+        tmpDir.setExecutable(true, false);
         configDir.mkdirs();
         homeDir.mkdirs();
         // X11 socket 目录预先建好（proot bind 目标必须存在，X server 后写 X0 进去）
@@ -371,11 +376,8 @@ public class ProotInstaller {
     private void addQemuArgs(List<String> cmd, File rootfsDir) {
         String qemuArch = SimConfig.getQemuArch(context, rootfsDir.getName());
         if (SimConfig.QEMU_NONE.equals(qemuArch)) return;
-        // v31：32 位宿主只支持 32 位 guest 目标，选到 64 位目标时不注入 -q
-        if (!SimConfig.hostIs64() && SimConfig.qemuTargetIs64(qemuArch)) {
-            Log.w(TAG, "宿主 32 位 ABI，目标 " + qemuArch + " 需要 64 位，跳过 -q");
-            return;
-        }
+        // v31：32 位宿主的 arm 版 qemu 同样能承载 64 位 guest（实测 qemu-x86_64 可跑），
+        // 因此只有"找不到对应内置二进制"才跳过，不再因为宿主位数跳过。
         File host = QemuSupport.hostQemu(context, qemuArch);
         if (host == null) {
             Log.w(TAG, "QEMU 架构无对应二进制: " + qemuArch);

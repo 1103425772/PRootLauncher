@@ -85,7 +85,7 @@ public final class QemuSupport {
         File binDir = builtinBinDir(ctx);
         File libDir = builtinLibDir(ctx);
         File marker = new File(builtinDir(ctx), ".version-" + abi);
-        if (marker.isFile()) return;
+        if (marker.isFile() && builtinMatchesHost(binDir)) return;
         binDir.mkdirs();
         libDir.mkdirs();
         try {
@@ -147,10 +147,11 @@ public final class QemuSupport {
         return builtin;
     }
 
-    /** 宿主侧静态模拟器是否已就绪（存在 / 体积合理 / 可执行） */
+    /** 宿主侧静态模拟器是否已就绪（存在 / 体积合理 / ELF 架构匹配 / 可执行） */
     public static boolean isHostReady(Context ctx, String arch) {
         File f = hostQemu(ctx, arch);
         if (f == null || !f.isFile() || f.length() < 1024L) return false;
+        if (!isValidElfForHost(f)) return false;
         if (!f.canExecute()) f.setExecutable(true, false);
         return f.canExecute();
     }
@@ -193,13 +194,8 @@ public final class QemuSupport {
                 + "（" + (host.length() / (1024 * 1024)) + " MB）";
         }
 
-        // 32 位宿主：内置 arm 版只有 32 位 guest 模拟器，
-        // 若用户选了 64 位目标架构则明确说明（其余情况照常启动）
-        if (!SimConfig.hostIs64() && SimConfig.qemuTargetIs64(arch)) {
-            throw new Exception("当前设备是 32 位 ABI（" + android.os.Build.SUPPORTED_ABIS[0]
-                + "），无法模拟 64 位目标架构 " + arch + "。\n"
-                + "32 位设备可用：i386 / arm / m68k / ppc / riscv32。");
-        }
+        // v31：32 位宿主的 arm 版 qemu 同样能承载 64 位 guest
+        // （实测 qemu-x86_64 在 32 位 ARM 上跑 alpine x86_64 正常），不再拦截
 
         throw new Exception("未找到内置模拟器: " + bin
             + "\n当前 ABI: " + android.os.Build.SUPPORTED_ABIS[0]
@@ -277,19 +273,39 @@ public final class QemuSupport {
     // ELF 校验
     // ================================================================
 
-    /** 读出 ELF 头，校验魔数 + e_machine + 64 位标志 */
-    private static boolean isValidElfForHost(File f, int expectedMachine) {
+    /** 宿主 ABI 期望的 (EI_CLASS, e_machine) */
+    private static int[] hostElfExpect() {
+        if (SimConfig.hostIs64()) {
+            String a = SimConfig.qemuDebArch();
+            return new int[]{2, "amd64".equals(a) ? 62 : 183};
+        }
+        return new int[]{1, 40}; // ELF32 / EM_ARM
+    }
+
+    /** 读出 ELF 头，校验魔数 + 位宽 + e_machine 是否与宿主 ABI 匹配 */
+    private static boolean isValidElfForHost(File f) {
+        int[] want = hostElfExpect();
         try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(f, "r")) {
-            if (raf.length() < 64) return false;
-            byte[] h = new byte[64];
+            if (raf.length() < 52) return false;
+            byte[] h = new byte[52];
             raf.readFully(h);
             if (h[0] != 0x7F || h[1] != 'E' || h[2] != 'L' || h[3] != 'F') return false;
-            if (h[4] != 2) return false;        // EI_CLASS=2 → 64 位
-            int machine = (h[18] & 0xFF) | ((h[19] & 0xFF) << 8); // e_machine 小端
-            return machine == expectedMachine;
+            if (h[4] != want[0]) return false;
+            int machine = (h[18] & 0xFF) | ((h[19] & 0xFF) << 8);
+            return machine == want[1];
         } catch (IOException e) {
             return false;
         }
+    }
+
+    /** 内置 bin 目录里是否至少有一个与宿主 ABI 匹配的二进制 */
+    private static boolean builtinMatchesHost(File binDir) {
+        String[] names = binDir.list();
+        if (names == null || names.length == 0) return false;
+        for (String n : names) {
+            if (isValidElfForHost(new File(binDir, n))) return true;
+        }
+        return false;
     }
 
     // ================================================================

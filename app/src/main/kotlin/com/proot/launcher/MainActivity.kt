@@ -1008,24 +1008,19 @@ private fun SecretDialog(activity: MainActivity, dir: File, onDismiss: () -> Uni
     var realSim by remember { mutableStateOf(SimConfig.isRealSim(activity, name)) }
     var qemuArch by remember { mutableStateOf(SimConfig.getQemuArch(activity, name)) }
 
-    val host64 = SimConfig.hostIs64()
-    val qemuOptions = remember(host64, nativeArch) {
-        val all = listOf(
+    val qemuOptions = remember(nativeArch) {
+        listOf(
             SimConfig.QEMU_NONE to "不使用跨架构模拟",
-            SimConfig.QEMU_X86_64 to "x86_64 模拟（内置 qemu-user 11.1.3）",
-            SimConfig.QEMU_I386 to "i386 模拟（内置 qemu-user 11.1.3）",
-            SimConfig.QEMU_ARM to "ARM 32位模拟（内置 qemu-user 11.1.3）",
-            SimConfig.QEMU_AARCH64 to "ARM64 模拟（内置 qemu-user 11.1.3）",
-            SimConfig.QEMU_M68K to "m68k 模拟（内置 qemu-user 11.1.3）",
-            SimConfig.QEMU_PPC to "PPC 32位模拟（内置 qemu-user 11.1.3）",
-            SimConfig.QEMU_PPC64 to "PPC64 模拟（内置 qemu-user 11.1.3）",
-            SimConfig.QEMU_RISCV32 to "RISC-V 32 模拟（内置 qemu-user 11.1.3）",
-            SimConfig.QEMU_RISCV64 to "RISC-V 64 模拟（内置 qemu-user 11.1.3）",
+            SimConfig.QEMU_X86_64 to "x86_64 模拟（内置 qemu-user，离线）",
+            SimConfig.QEMU_I386 to "i386 模拟（内置 qemu-user，离线）",
+            SimConfig.QEMU_ARM to "ARM 32位模拟（内置 qemu-user，离线）",
+            SimConfig.QEMU_AARCH64 to "ARM64 模拟（内置 qemu-user，离线）",
+            SimConfig.QEMU_M68K to "m68k 模拟（内置 qemu-user，离线）",
+            SimConfig.QEMU_PPC to "PPC 32位模拟（内置 qemu-user，离线）",
+            SimConfig.QEMU_PPC64 to "PPC64 模拟（内置 qemu-user，离线）",
+            SimConfig.QEMU_RISCV32 to "RISC-V 32 模拟（内置 qemu-user，离线）",
+            SimConfig.QEMU_RISCV64 to "RISC-V 64 模拟（内置 qemu-user，离线）",
         ).filter { it.first == SimConfig.QEMU_NONE || it.first != nativeArch }
-        // v31：32 位设备只保留 32 位目标架构（内置的是 arm 版 qemu，
-        // 64 位 guest 在 32 位宿主上跑不动）
-        if (host64) all
-        else all.filter { it.first == SimConfig.QEMU_NONE || !SimConfig.qemuTargetIs64(it.first) }
     }
 
     BaseDialog(
@@ -1050,15 +1045,13 @@ private fun SecretDialog(activity: MainActivity, dir: File, onDismiss: () -> Uni
 
         // 跨架构模拟（QEMU）
         Text(activity.getString(R.string.qemu_title), style = MaterialTheme.typography.titleSmall)
-        if (!host64) {
-            Spacer(Modifier.height(2.dp))
-            Text(
-                "当前设备为 32 位 ABI（${android.os.Build.SUPPORTED_ABIS[0]}），"
-                    + "仅支持 32 位目标架构：i386 / arm / m68k / ppc / riscv32。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        Spacer(Modifier.height(2.dp))
+        Text(
+            "模拟器必须与 rootfs 架构一致（例如 alpine x86_64 要选 x86_64）。"
+                + "启动时会自动检测 rootfs 架构，不一致会自动纠正。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         Spacer(Modifier.height(4.dp))
         Column(
             verticalArrangement = Arrangement.spacedBy(6.dp),

@@ -4,6 +4,7 @@ import android.content.Context;
 import android.util.Log;
 
 import java.io.File;
+import java.io.RandomAccessFile;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -180,9 +181,10 @@ public final class SimConfig {
     }
 
     /**
-     * 目标架构是否需要 64 位 guest 支持。
-     * 32 位宿主（arm）上，qemu 只能安全承载 32 位 guest：
-     * x86_64 / aarch64 / ppc64 / riscv64 需要 64 位地址空间，32 位宿主下不保证能跑。
+     * 目标架构是否需要 64 位 guest 支持（仅用于提示文案，不用于拦截）。
+     * v31 实测：32 位 ARM 宿主上的 arm 版 qemu-x86_64 可以正常承载 64 位 guest
+     * （Termux 里 `proot -q qemu-x86_64` 跑 alpine x86_64，uname 显示 x86_64），
+     * 所以不再因为"宿主 32 位"就把 64 位目标选项过滤掉。
      */
     public static boolean qemuTargetIs64(String arch) {
         if (arch == null) return false;
@@ -195,6 +197,71 @@ public final class SimConfig {
             default:
                 return false;
         }
+    }
+
+    /** ELF e_machine + EI_CLASS → QEMU 架构名（无法判断返回 null） */
+    private static String elfMachineToArch(int machine, int elfClass) {
+        switch (machine) {
+            case 62: return QEMU_X86_64;
+            case 3:  return QEMU_I386;
+            case 183: return QEMU_AARCH64;
+            case 40: return QEMU_ARM;
+            case 20: return QEMU_PPC;
+            case 21: return QEMU_PPC64;
+            case 4:  return QEMU_M68K;
+            case 243: return elfClass == 2 ? QEMU_RISCV64 : QEMU_RISCV32;
+            default: return null;
+        }
+    }
+
+    /** 读 ELF 头，返回 QEMU 架构名（跟随符号链接） */
+    private static String readElfArch(File f) {
+        try (RandomAccessFile raf = new RandomAccessFile(f, "r")) {
+            byte[] h = new byte[20];
+            if (raf.read(h) < 20) return null;
+            if (h[0] != 0x7f || h[1] != 'E' || h[2] != 'L' || h[3] != 'F') return null;
+            int elfClass = h[4];                 // 1=ELF32 2=ELF64
+            int machine = (h[18] & 0xff) | ((h[19] & 0xff) << 8);
+            return elfMachineToArch(machine, elfClass);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * 检测 rootfs 的真实架构（v31）。
+     * 优先读 Alpine 的 /etc/apk/arch；否则读 busybox/env 的 ELF 头。
+     * 用途：防止用户在容器里选错模拟器（例如 x86_64 rootfs 却选了 qemu-i386，
+     * 那会直接 execve Permission denied）。
+     */
+    public static String detectRootfsArch(File rootfs) {
+        if (rootfs == null || !rootfs.isDirectory()) return null;
+        File apkArch = new File(rootfs, "etc/apk/arch");
+        if (apkArch.isFile()) {
+            try {
+                String s = new String(java.nio.file.Files.readAllBytes(apkArch.toPath())).trim();
+                switch (s) {
+                    case "x86_64": return QEMU_X86_64;
+                    case "x86": return QEMU_I386;
+                    case "aarch64": return QEMU_AARCH64;
+                    case "armhf": case "armv7": case "arm": return QEMU_ARM;
+                    case "riscv64": return QEMU_RISCV64;
+                    case "ppc64le": return QEMU_PPC64;
+                    default: break;
+                }
+            } catch (Exception ignored) {}
+        }
+        for (String rel : new String[]{
+                "bin/busybox", "usr/bin/env", "bin/sh", "usr/bin/sh",
+                "bin/ls", "usr/bin/ls", "lib/ld-musl-x86_64.so.1",
+                "lib64/ld-linux-x86-64.so.2", "lib/ld-linux-aarch64.so.1"}) {
+            File f = new File(rootfs, rel);
+            if (f.exists()) {
+                String a = readElfArch(f);
+                if (a != null) return a;
+            }
+        }
+        return null;
     }
 
     /** 该 rootfs 的 QEMU 模拟架构（默认 none） */
