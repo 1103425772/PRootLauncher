@@ -303,6 +303,11 @@ public class TerminalActivity extends Activity {
             appendOutput("启动 proot...\n");
             appendOutput("RootFS: " + rootfsName + "\n");
             appendOutput("Shell: " + shell + "\n");
+            appendOutput("[诊断] 宿主 ABI: " + String.join("/", android.os.Build.SUPPORTED_ABIS)
+                    + " pageSize=" + pageSizeKb() + "KB\n");
+            appendOutput("[诊断] 完整命令: " + joinCmd(cmd) + "\n");
+            appendOutput("[诊断] PATH=" + getEnv(env, "PATH") + "\n");
+            appendOutput("[诊断] LD_LIBRARY_PATH=" + getEnv(env, "LD_LIBRARY_PATH") + "\n");
             appendOutput("----------------------------------------\n");
 
             // v34：改由 Termux 的 pty 启动（libtermux.so 的 posix_openpt + forkpty）
@@ -313,11 +318,18 @@ public class TerminalActivity extends Activity {
             term.setOnSessionFinished(() -> {
                 running = false;
                 if (isFallbackShell) return;
-                long alive = System.currentTimeMillis() - sessionStartAt;
-                if (alive < 3000) {
-                    appendOutput("\nproot 启动失败，自动进入 Android Shell...\n");
-                    startFallbackShell();
+                // v34.3：不再自动跳 Android Shell —— 那会把真正的报错滚掉。
+                // 把退出码和提示留在终端里，让失败原因可见。
+                int code = -1;
+                try {
+                    if (term.getSession() != null) code = term.getSession().getExitStatus();
+                } catch (Exception ignored) {
                 }
+                long alive = System.currentTimeMillis() - sessionStartAt;
+                appendOutput("\n========================================\n");
+                appendOutput("proot 已退出: exit=" + code + " 存活 " + alive + "ms\n");
+                appendOutput("如需进入 Android Shell，点「退出」后再从主界面进，或在此输入 exit\n");
+                appendOutput("========================================\n");
             });
             term.start(cmd, getFilesDir().getAbsolutePath(), env);
 
@@ -330,6 +342,39 @@ public class TerminalActivity extends Activity {
             Log.e(TAG, "Failed to start proot", e);
             startFallbackShell();
         }
+    }
+
+    private static String joinCmd(String[] cmd) {
+        StringBuilder sb = new StringBuilder();
+        for (String c : cmd) {
+            if (sb.length() > 0) sb.append(' ');
+            sb.append(c);
+        }
+        return sb.toString();
+    }
+
+    private static String getEnv(String[] env, String key) {
+        for (String e : env) {
+            if (e.startsWith(key + "=")) return e.substring(key.length() + 1);
+        }
+        return "(unset)";
+    }
+
+    private static int pageSizeKb() {
+        try {
+            java.io.BufferedReader r = new java.io.BufferedReader(
+                    new java.io.FileReader("/proc/self/smaps_rollup"));
+            String line;
+            while ((line = r.readLine()) != null) {
+                if (line.startsWith("KernelPageSize:")) {
+                    r.close();
+                    return Integer.parseInt(line.replaceAll("[^0-9]", "")) / 4;
+                }
+            }
+            r.close();
+        } catch (Exception ignored) {
+        }
+        return -1;
     }
 
     private void startFallbackShell() {
