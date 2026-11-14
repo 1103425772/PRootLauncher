@@ -70,7 +70,7 @@ public class TerminalActivity extends Activity {
         installer = new ProotInstaller(this);
 
         btnClose.setOnClickListener(v -> finish());
-        btnMinimize.setOnClickListener(v -> moveTaskToBack(true));
+        btnMinimize.setOnClickListener(v -> goHome());
         btnNewTab.setOnClickListener(v -> newTab());
 
         buildExtraKeys();
@@ -409,9 +409,16 @@ public class TerminalActivity extends Activity {
         terminals.clear();
     }
 
+    /** 最小化：回到主界面，终端进程在后台继续跑（不 finish、不 shutdown） */
+    private void goHome() {
+        Intent i = new Intent(this, MainActivity.class);
+        i.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+        startActivity(i);
+    }
+
     @Override
     public void onBackPressed() {
-        // 返回键 = 最小化到后台（前台服务保活）
-        moveTaskToBack(true);
+        // 返回键 = 回主界面（终端继续后台运行）
+        goHome();
     }
 }
