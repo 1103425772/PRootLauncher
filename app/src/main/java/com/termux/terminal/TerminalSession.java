@@ -65,6 +65,10 @@ public final class TerminalSession extends TerminalOutput {
      */
     private int mTerminalFileDescriptor;
 
+    /** v34：无 pty 降级模式（Android 10+ targetSdk>=29 可能不允许访问 /dev/ptmx） */
+    private boolean mExternalMode = false;
+    private java.io.OutputStream mExternalOutput;
+
     /** Set by the application for user identification of session, not by terminal. */
     public String mSessionName;
 
@@ -99,12 +103,37 @@ public final class TerminalSession extends TerminalOutput {
             mEmulator.updateTerminalSessionClient(client);
     }
 
+    /**
+     * v34：启用“外部进程”模式 —— 不用 pty，改由调用方把普通 Process 的 stdout 字节喂进来。
+     * 必须在 {@link #updateSize(int, int, int, int)}（即 initializeEmulator）之前调用。
+     */
+    public void setExternalMode(java.io.OutputStream output) {
+        mExternalMode = true;
+        mExternalOutput = output;
+        mShellPid = 1;
+    }
+
+    /** 降级模式：把外部进程的输出字节交给 emulator 渲染（调用方需保证在主线程） */
+    public void feedExternalBytes(byte[] data, int length) {
+        if (mEmulator != null && length > 0) {
+            mEmulator.append(data, length);
+            notifyScreenUpdate();
+        }
+    }
+
+    /** 降级模式：把外部进程的输入流挂上（进程启动后才能拿到） */
+    public void setExternalOutput(java.io.OutputStream output) {
+        mExternalOutput = output;
+    }
+
     /** Inform the attached pty of the new size and reflow or initialize the emulator. */
     public void updateSize(int columns, int rows, int cellWidthPixels, int cellHeightPixels) {
         if (mEmulator == null) {
             initializeEmulator(columns, rows, cellWidthPixels, cellHeightPixels);
         } else {
-            JNI.setPtyWindowSize(mTerminalFileDescriptor, rows, columns, cellWidthPixels, cellHeightPixels);
+            if (!mExternalMode) {
+                JNI.setPtyWindowSize(mTerminalFileDescriptor, rows, columns, cellWidthPixels, cellHeightPixels);
+            }
             mEmulator.resize(columns, rows, cellWidthPixels, cellHeightPixels);
         }
     }
@@ -122,6 +151,13 @@ public final class TerminalSession extends TerminalOutput {
      */
     public void initializeEmulator(int columns, int rows, int cellWidthPixels, int cellHeightPixels) {
         mEmulator = new TerminalEmulator(this, columns, rows, cellWidthPixels, cellHeightPixels, mTranscriptRows, mClient);
+
+        if (mExternalMode) {
+            // 降级模式：不创建 pty，emulator 已就绪，输出由调用方 feedExternalBytes 提供
+            mShellPid = 1;
+            mClient.setTerminalShellPid(this, 1);
+            return;
+        }
 
         int[] processId = new int[1];
         mTerminalFileDescriptor = JNI.createSubprocess(mShellPath, mCwd, mArgs, mEnv, processId, rows, columns, cellWidthPixels, cellHeightPixels);
@@ -176,6 +212,16 @@ public final class TerminalSession extends TerminalOutput {
     /** Write data to the shell process. */
     @Override
     public void write(byte[] data, int offset, int count) {
+        if (mExternalMode) {
+            if (mExternalOutput != null) {
+                try {
+                    mExternalOutput.write(data, offset, count);
+                    mExternalOutput.flush();
+                } catch (java.io.IOException ignored) {
+                }
+            }
+            return;
+        }
         if (mShellPid > 0) mTerminalToProcessIOQueue.write(data, offset, count);
     }
 
@@ -233,6 +279,10 @@ public final class TerminalSession extends TerminalOutput {
 
     /** Finish this terminal session by sending SIGKILL to the shell. */
     public void finishIfRunning() {
+        if (mExternalMode) {
+            mShellPid = -1;
+            return;
+        }
         if (isRunning()) {
             try {
                 Os.kill(mShellPid, OsConstants.SIGKILL);
@@ -252,7 +302,7 @@ public final class TerminalSession extends TerminalOutput {
         // Stop the reader and writer threads, and close the I/O streams
         mTerminalToProcessIOQueue.close();
         mProcessToTerminalIOQueue.close();
-        JNI.close(mTerminalFileDescriptor);
+        if (!mExternalMode) JNI.close(mTerminalFileDescriptor);
     }
 
     @Override
@@ -335,6 +385,11 @@ public final class TerminalSession extends TerminalOutput {
 
     @SuppressLint("HandlerLeak")
     class MainThreadHandler extends Handler {
+
+        /** v34：绑定主 Looper —— session 可能由后台线程创建，不能依赖调用线程的 Looper */
+        MainThreadHandler() {
+            super(android.os.Looper.getMainLooper());
+        }
 
         final byte[] mReceiveBuffer = new byte[64 * 1024];
 

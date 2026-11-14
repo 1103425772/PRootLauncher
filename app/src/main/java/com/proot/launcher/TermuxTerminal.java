@@ -9,7 +9,12 @@ import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.ViewGroup;
 import android.view.inputmethod.InputMethodManager;
+import android.util.TypedValue;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewTreeObserver;
 import android.widget.FrameLayout;
+import android.widget.TextView;
 
 import com.termux.terminal.TerminalEmulator;
 import com.termux.terminal.TerminalSession;
@@ -17,6 +22,10 @@ import com.termux.terminal.TerminalSessionClient;
 import com.termux.view.TerminalView;
 import com.termux.view.TerminalViewClient;
 
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 
 /**
@@ -41,6 +50,15 @@ public class TermuxTerminal implements TerminalViewClient, TerminalSessionClient
     private final TerminalView view;
     private TerminalSession session;
     private final StringBuilder pendingOutput = new StringBuilder();
+    private TextView statusView;
+    private boolean attached = false;
+    private boolean ptyFailed = false;
+    private boolean pipeModeActive = false;
+    private volatile int outputCount = 0;
+    private Process pipeProcess;
+    private String[] pendingCmd;
+    private String pendingCwd;
+    private String[] pendingEnv;
     private int textSize = DEFAULT_TEXT_SIZE;
     private Runnable onSessionFinished;
 
@@ -55,6 +73,17 @@ public class TermuxTerminal implements TerminalViewClient, TerminalSessionClient
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
         container.addView(view, lp);
+
+        // 可视诊断层：Termux 终端建不起来时，屏幕会是纯黑，用户无法提供任何线索。
+        // 这里把 session / emulator / JNI 的真实错误直接画在屏幕上。
+        statusView = new TextView(activity);
+        statusView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        statusView.setTextColor(0xFF9BE89B);
+        statusView.setGravity(Gravity.TOP | Gravity.START);
+        statusView.setPadding(16, 16, 16, 16);
+        statusView.setText("Termux 终端初始化中…\n");
+        container.addView(statusView, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
     }
 
     public TerminalView getView() {
@@ -78,21 +107,200 @@ public class TermuxTerminal implements TerminalViewClient, TerminalSessionClient
      */
     public void start(String[] cmd, String cwd, String[] env) {
         if (cmd == null || cmd.length == 0) throw new IllegalArgumentException("empty cmd");
+        final String[] c = cmd;
+        final String[] e = env;
+        // TerminalSession 会在构造时 new Handler()，且 TerminalView 操作必须在主线程 ——
+        // 调用方（launchProot）跑在后台线程，这里统一切回主线程再初始化
+        activity.runOnUiThread(() -> startInternal(c, cwd, e));
+    }
+
+    private void startInternal(String[] cmd, String cwd, String[] env) {
+        pendingCmd = cmd;
+        pendingCwd = cwd;
+        pendingEnv = env;
+        attached = false;
+        ptyFailed = false;
+        pipeModeActive = false;
+        outputCount = 0;
+        detached();
+        try {
+            session = new TerminalSession(cmd[0], cwd, cmd, env, 2000, this);
+            setStatus("pty 模式：session 已创建，等待布局…\n", false);
+        } catch (Throwable t) {
+            android.util.Log.e(TAG, "pty session failed", t);
+            ptyFailed = true;
+            startPipeMode("pty 创建失败: " + t);
+            return;
+        }
+        attachWhenLaidOut();
+    }
+
+    private void detached() {
         if (session != null) {
             try {
                 session.finishIfRunning();
             } catch (Exception ignored) {
             }
+            session = null;
         }
-        session = new TerminalSession(cmd[0], cwd, cmd, env, 2000, this);
-        // 必须等 TerminalView 完成一次布局（onSizeChanged 才有宽高），
-        // 否则 updateSize() 会算出 0 列 0 行，pty 尺寸非法
-        view.post(() -> {
-            if (session == null) return;
+        if (pipeProcess != null) {
+            try {
+                pipeProcess.destroy();
+            } catch (Exception ignored) {
+            }
+            pipeProcess = null;
+        }
+    }
+
+    private void attachWhenLaidOut() {
+        if (view.getWidth() > 0 && view.getHeight() > 0) {
+            attachNow();
+            return;
+        }
+        view.getViewTreeObserver().addOnGlobalLayoutListener(
+                new ViewTreeObserver.OnGlobalLayoutListener() {
+                    @Override
+                    public void onGlobalLayout() {
+                        if (view.getWidth() <= 0 || view.getHeight() <= 0) return;
+                        if (view.getViewTreeObserver().isAlive()) {
+                            view.getViewTreeObserver().removeOnGlobalLayoutListener(this);
+                        }
+                        attachNow();
+                    }
+                });
+    }
+
+    private void attachNow() {
+        if (attached || session == null) return;
+        attached = true;
+        try {
             view.attachSession(session);
+            view.updateSize();
             view.requestFocus();
+            view.invalidate();
+            TerminalEmulator em = session.getEmulator();
+            if (em == null) {
+                retryAttach();
+                return;
+            }
+            setStatus(null, false);
             flushPending();
-        });
+            // pty 可能“静默失败”：fd 打开成功但子进程 open(pts) 失败后退出，
+            // 屏幕上只会是空白。4 秒内一条输出都没有就降级到管道模式。
+            view.postDelayed(() -> {
+                if (!pipeModeActive && outputCount <= 0) {
+                    startPipeMode("pty 无任何输出，疑似 /dev/pts 被拒");
+                }
+            }, 6000);
+        } catch (Throwable t) {
+            android.util.Log.e(TAG, "pty attach failed", t);
+            // /dev/ptmx 在 targetSdk>=29 上可能被拒绝，直接降级为管道模式
+            ptyFailed = true;
+            startPipeMode("pty 不可用: " + t);
+        }
+    }
+
+    private void retryAttach() {
+        view.postDelayed(() -> {
+            if (session == null) return;
+            try {
+                view.updateSize();
+                view.invalidate();
+                if (session.getEmulator() != null) {
+                    setStatus(null, false);
+                    flushPending();
+                } else {
+                    ptyFailed = true;
+                    startPipeMode("emulator 未创建（尺寸异常）");
+                }
+            } catch (Throwable t) {
+                ptyFailed = true;
+                startPipeMode("重试失败: " + t);
+            }
+        }, 800);
+    }
+
+    /**
+     * 降级模式：没有 pty 时用普通 Process，把 stdout 字节喂给 Termux 的 TerminalEmulator。
+     * ANSI 颜色、256 色、宽字符、scrollback 仍然全部由 Termux 渲染器负责。
+     */
+    private void startPipeMode(String reason) {
+        android.util.Log.w(TAG, "fallback to pipe mode: " + reason);
+        pipeModeActive = true;
+        attached = false;
+        // 收掉旧的 pty session（若 pty 半死不活会占着 fd 和子进程）
+        if (session != null) {
+            try {
+                session.finishIfRunning();
+            } catch (Exception ignored) {
+            }
+            session = null;
+        }
+        try {
+            session = new TerminalSession(pendingCmd[0], pendingCwd, pendingCmd, pendingEnv, 2000, this);
+            session.setExternalMode(new ByteArrayOutputStream());
+        } catch (Throwable t) {
+            setStatus("终端不可用：" + reason + "\n" + t + "\n", true);
+            return;
+        }
+        try {
+            view.attachSession(session);
+            view.updateSize();
+            view.requestFocus();
+            view.invalidate();
+        } catch (Throwable t) {
+            setStatus("终端不可用：" + reason + "\n" + t + "\n", true);
+            return;
+        }
+        try {
+            ProcessBuilder pb = new ProcessBuilder(pendingCmd);
+            pb.environment().clear();
+            for (String e : pendingEnv) {
+                int eq = e.indexOf('=');
+                if (eq > 0) pb.environment().put(e.substring(0, eq), e.substring(eq + 1));
+            }
+            pb.directory(new File(pendingCwd));
+            pb.redirectErrorStream(true);
+            pipeProcess = pb.start();
+            session.setExternalOutput(pipeProcess.getOutputStream());
+            setStatus("管道模式（无 pty）：proot 已启动\n" + reason + "\n", false);
+            view.postDelayed(() -> setStatus(null, false), 3000);
+
+            final Process proc = pipeProcess;
+            new Thread(() -> {
+                try (InputStream in = proc.getInputStream()) {
+                    byte[] buf = new byte[4096];
+                    int len;
+                    while ((len = in.read(buf)) > 0) {
+                        final byte[] chunk = new byte[len];
+                        System.arraycopy(buf, 0, chunk, 0, len);
+                        activity.runOnUiThread(() -> {
+                            if (session != null) session.feedExternalBytes(chunk, chunk.length);
+                            view.onScreenUpdated();
+                        });
+                    }
+                } catch (Exception ignored) {
+                }
+                activity.runOnUiThread(() -> {
+                    if (onSessionFinished != null) onSessionFinished.run();
+                });
+            }, "TermuxPipeReader").start();
+        } catch (Throwable t) {
+            android.util.Log.e(TAG, "pipe start failed", t);
+            setStatus("proot 启动失败：" + t + "\n", true);
+            append("proot 启动失败: " + t + "\n");
+        }
+    }
+
+    private void setStatus(String text, boolean error) {
+        Runnable r = () -> {
+            if (statusView == null) return;
+            statusView.setTextColor(error ? 0xFFFF8A80 : 0xFF9BE89B);
+            statusView.setText(text == null ? "" : text);
+            statusView.setVisibility((text == null || text.isEmpty()) ? View.GONE : View.VISIBLE);
+        };
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) r.run();
+        else activity.runOnUiThread(r);
     }
 
     /** 把 app 侧的诊断日志写进终端（session 未就绪时先缓存） */
@@ -139,6 +347,10 @@ public class TermuxTerminal implements TerminalViewClient, TerminalSessionClient
     }
 
     public void shutdown() {
+        if (pipeProcess != null) {
+            try { pipeProcess.destroy(); } catch (Exception ignored) { }
+            pipeProcess = null;
+        }
         if (session != null) {
             try {
                 session.finishIfRunning();
@@ -254,6 +466,7 @@ public class TermuxTerminal implements TerminalViewClient, TerminalSessionClient
 
     @Override
     public void onTextChanged(TerminalSession changedSession) {
+        outputCount++;
         activity.runOnUiThread(() -> view.onScreenUpdated());
     }
 

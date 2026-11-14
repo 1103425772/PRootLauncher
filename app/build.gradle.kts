@@ -12,8 +12,8 @@ android {
     defaultConfig {
         applicationId = "com.proot.launcher"
         minSdk = 24
-        versionCode = 45
-        versionName = "1.14.4-v34"
+        versionCode = 47
+        versionName = "1.14.6-v34.2"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
         externalNativeBuild {
             ndkBuild {
