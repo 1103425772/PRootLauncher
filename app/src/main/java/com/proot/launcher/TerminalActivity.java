@@ -26,6 +26,9 @@ public class TerminalActivity extends Activity {
     private static final int REQUEST_STORAGE_PERMISSION = 2001;
     private static final int MAX_TABS = 5;
 
+    /** 正在运行的终端窗口列表（供 MainActivity 显示和关闭） */
+    public static final List<TerminalActivity> activeWindows = new java.util.concurrent.CopyOnWriteArrayList<>();
+
     private final List<TermuxTerminal> terminals = new ArrayList<>();
     private int currentIndex = -1;
 
@@ -39,8 +42,8 @@ public class TerminalActivity extends Activity {
     private volatile boolean running = false;
     private long sessionStartAt = 0;
 
-    private String rootfsPath;
-    private String rootfsName;
+    public String rootfsPath;
+    public String rootfsName;
     private String x11Command;
     private boolean realSim = false;
     private ProotInstaller installer;
@@ -68,6 +71,7 @@ public class TerminalActivity extends Activity {
         if (rootfsName != null) tvTitle.setText(rootfsName);
 
         installer = new ProotInstaller(this);
+        activeWindows.add(this);
 
         btnClose.setOnClickListener(v -> finish());
         btnMinimize.setOnClickListener(v -> goHome());
@@ -252,32 +256,16 @@ public class TerminalActivity extends Activity {
 
     private void startProotIn(TermuxTerminal t) {
         if (rootfsPath == null) {
-            appendTo(t, "错误: 未指定 rootfs 路径，进入 Android Shell\n");
             startFallbackShellIn(t);
             return;
         }
         File rootfsDir = new File(rootfsPath);
         if (!rootfsDir.exists()) {
-            appendTo(t, "错误: rootfs 目录不存在: " + rootfsPath + "\n");
             startFallbackShellIn(t);
             return;
         }
         installer.prepareRuntime();
         String shell = installer.defaultShellPath(rootfsDir);
-
-        File shellFile = new File(rootfsDir, shell.substring(1));
-        boolean shellLinkExists = false;
-        try {
-            shellLinkExists = java.nio.file.Files.exists(
-                    shellFile.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS);
-        } catch (Exception ignored) { }
-        boolean busyboxExists = new File(rootfsDir, "bin/busybox").isFile()
-            || new File(rootfsDir, "usr/bin/busybox").isFile();
-        if (!shellLinkExists && !busyboxExists) {
-            appendTo(t, "[诊断] " + shell + " 不存在！\n");
-        } else {
-            appendTo(t, "[诊断] " + shell + " 可用\n");
-        }
 
         File canonicalRootfs;
         try {
@@ -294,17 +282,14 @@ public class TerminalActivity extends Activity {
             if (!SimConfig.QEMU_NONE.equals(qemuArch)) {
                 String realArch = SimConfig.detectRootfsArch(canonicalRootfs);
                 if (realArch != null && !realArch.equals(qemuArch)) {
-                    appendTo(t, "[诊断] 模拟器自动切换: " + qemuArch + " → " + realArch + "\n");
                     SimConfig.setQemuArch(this, rootfsName, realArch);
                     qemuArch = realArch;
                 }
-                appendTo(t, "[QEMU] 跨架构: " + qemuArch + "\n");
                 if (!QemuSupport.isHostReady(this, qemuArch)) {
-                    appendTo(t, "[QEMU] 部署内置模拟器...\n");
                     try {
-                        appendTo(t, "[QEMU] " + QemuSupport.ensureInstalled(this, canonicalRootfs, qemuArch) + "\n");
+                        QemuSupport.ensureInstalled(this, canonicalRootfs, qemuArch);
                     } catch (Exception e) {
-                        appendTo(t, "[QEMU] 部署失败: " + e.getMessage() + "\n");
+                        appendTo(t, "[QEMU] " + e.getMessage() + "\n");
                     }
                 }
             }
@@ -319,10 +304,6 @@ public class TerminalActivity extends Activity {
             }
             String[] env = installer.buildEnv();
 
-            appendTo(t, "启动 proot...\n");
-            appendTo(t, "RootFS: " + rootfsName + "  Shell: " + shell + "\n");
-            appendTo(t, "----------------------------------------\n");
-
             running = true;
             isFallbackShell = false;
             sessionStartAt = System.currentTimeMillis();
@@ -332,13 +313,12 @@ public class TerminalActivity extends Activity {
                 try {
                     if (t.getSession() != null) code = t.getSession().getExitStatus();
                 } catch (Exception ignored) { }
-                long alive = System.currentTimeMillis() - sessionStartAt;
-                appendTo(t, "\nproot 已退出: exit=" + code + " 存活 " + alive + "ms\n");
+                appendTo(t, "\n[进程已退出 code=" + code + "]\n");
             });
             t.start(cmd, getFilesDir().getAbsolutePath(), env);
             startContainerService();
         } catch (Exception e) {
-            appendTo(t, "proot 启动失败: " + e.getMessage() + "\n");
+            appendTo(t, "启动失败: " + e.getMessage() + "\n");
             startFallbackShellIn(t);
         }
     }
@@ -404,6 +384,7 @@ public class TerminalActivity extends Activity {
     protected void onDestroy() {
         super.onDestroy();
         running = false;
+        activeWindows.remove(this);
         try { stopService(new Intent(this, ContainerService.class)); } catch (Exception e) { }
         for (TermuxTerminal t : terminals) t.shutdown();
         terminals.clear();

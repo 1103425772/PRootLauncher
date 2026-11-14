@@ -37,6 +37,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -93,6 +94,7 @@ import java.util.zip.GZIPInputStream
 class MainActivity : ComponentActivity() {
 
     lateinit var installer: ProotInstaller
+    private val resumeTick = mutableStateOf(0)
 
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
@@ -114,6 +116,7 @@ class MainActivity : ComponentActivity() {
                     activity = this@MainActivity,
                     themeMode = themeMode,
                     seedColor = seedColor,
+                    resumeTick = resumeTick.value,
                     onThemeChange = { mode, seed ->
                         themeMode = mode
                         seedColor = seed
@@ -123,6 +126,11 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        resumeTick.value++
     }
 }
 
@@ -430,6 +438,7 @@ private fun MainScreen(
     activity: MainActivity,
     themeMode: String,
     seedColor: Color,
+    resumeTick: Int,
     onThemeChange: (mode: String, seed: Color) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -558,6 +567,9 @@ private fun MainScreen(
             )
         }
     ) { contentPadding ->
+        val runningWindows = remember(resumeTick) {
+            com.proot.launcher.TerminalActivity.activeWindows.toList()
+        }
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -565,6 +577,41 @@ private fun MainScreen(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            // ---------- 运行中窗口列表 ----------
+            if (runningWindows.isNotEmpty()) {
+                item(key = "running_header") {
+                    Text("运行中窗口 (${runningWindows.size})",
+                        style = MaterialTheme.typography.titleSmall)
+                }
+                items(runningWindows.size, key = { "win_$it" }) { i ->
+                    val w = runningWindows[i]
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                w.rootfsName ?: "终端",
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                            TextButton(onClick = {
+                                val intent = android.content.Intent(activity, com.proot.launcher.TerminalActivity::class.java)
+                                intent.addFlags(android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                                activity.startActivity(intent)
+                            }) { Text("打开") }
+                            TextButton(onClick = { w.finish() }) {
+                                Text("✕", color = MaterialTheme.colorScheme.error)
+                            }
+                        }
+                    }
+                }
+            }
+
             // ---------- 下载区 ----------
             item {
                 Card(shape = RoundedCornerShape(20.dp)) {
