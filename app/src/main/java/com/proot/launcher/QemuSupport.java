@@ -80,6 +80,33 @@ public final class QemuSupport {
      * 把 APK assets/qemu/&lt;abi&gt; 里的 qemu 二进制与依赖库部署到 files/qemu/builtin。
      * 只复制缺失/大小不符的文件，部署完写 .version 标记，之后启动零 IO。
      */
+    /** v34.4：改这个版本号会触发一次强制重新部署 */
+    private static final String LIB_BUNDLE_VERSION = "v2-shmem";
+
+    private static String readMarker(File f) {
+        try {
+            if (!f.isFile()) return "";
+            byte[] buf = new byte[64];
+            java.io.FileInputStream fis = new java.io.FileInputStream(f);
+            int n = fis.read(buf);
+            fis.close();
+            if (n <= 0) return "";
+            return new String(buf, 0, n).trim();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private static void deleteRecursive(File f) {
+        if (f == null || !f.exists()) return;
+        if (f.isDirectory()) {
+            File[] kids = f.listFiles();
+            if (kids != null) for (File k : kids) deleteRecursive(k);
+        }
+        //noinspection ResultOfMethodCallIgnored
+        f.delete();
+    }
+
     public static synchronized void deployBuiltin(Context ctx) {
         String abi = SimConfig.hostIs64() ? "arm64" : "arm";
         File binDir = builtinBinDir(ctx);
@@ -87,18 +114,23 @@ public final class QemuSupport {
         File marker = new File(builtinDir(ctx), ".version-" + abi);
         // v33：二进制改放 jniLibs（nativeLibraryDir，可 execve），
         // assets 里只剩依赖库，这里只部署 lib
-        if (marker.isFile() && libDir.isDirectory()
+        // v34.4：marker 改为带版本号，升级资产后旧设备会强制重拷，
+        // 否则像 libandroid-shmem.so 这种后补的库永远补不进已部署目录
+        String currentMarker = readMarker(marker);
+        if (LIB_BUNDLE_VERSION.equals(currentMarker) && libDir.isDirectory()
                 && libDir.list() != null && libDir.list().length > 0) return;
+        // 资产清单变了：先清掉旧的 builtin lib，避免残留旧库造成混乱
+        deleteRecursive(libDir);
+        deleteRecursive(binDir);
         binDir.mkdirs();
         libDir.mkdirs();
         try {
             AssetManager am = ctx.getAssets();
             copyAssetDir(am, "qemu/" + abi + "/lib", libDir, false);
-            // 标记写入（内容是 abi，仅作存在性判断）
             FileOutputStream fos = new FileOutputStream(marker);
-            fos.write(abi.getBytes());
+            fos.write(LIB_BUNDLE_VERSION.getBytes());
             fos.close();
-            Log.i(TAG, "内置模拟器部署完成: " + builtinDir(ctx).getAbsolutePath());
+            Log.i(TAG, "内置模拟器部署完成(" + LIB_BUNDLE_VERSION + "): " + builtinDir(ctx).getAbsolutePath());
         } catch (Exception e) {
             Log.w(TAG, "内置模拟器部署失败: " + e.getMessage());
         }
