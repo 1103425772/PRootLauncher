@@ -45,7 +45,7 @@ public class WebTerminalActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_terminal);
+        setContentView(R.layout.activity_web_terminal);
 
         tvOutput = findViewById(R.id.tv_output);
         scrollOutput = findViewById(R.id.scroll_output);

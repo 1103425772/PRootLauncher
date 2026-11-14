@@ -12,9 +12,23 @@ android {
     defaultConfig {
         applicationId = "com.proot.launcher"
         minSdk = 24
-        versionCode = 44
-        versionName = "1.14.3-v33"
+        versionCode = 45
+        versionName = "1.14.4-v34"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
+        externalNativeBuild {
+            ndkBuild {
+                arguments += listOf("-j4")
+            }
+        }
+    }
+
+    // v34：编译 termux 的 libtermux.so（termux.c 自带 posix_openpt/forkpty 实现），
+    // 让 Termux 官方 TerminalSession 的伪终端真正可用（彩色、resize、job control）
+    ndkVersion = "26.1.10909125"
+    externalNativeBuild {
+        ndkBuild {
+            path = file("src/main/jni/Android.mk")
+        }
     }
 
     // v30：只保留 hi（targetSdk 34）。lo（targetSdk 28）已停用 ——

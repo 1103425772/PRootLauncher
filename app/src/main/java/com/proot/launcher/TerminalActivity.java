@@ -13,14 +13,11 @@ import android.view.View;
 import android.view.inputmethod.EditorInfo;
 import android.widget.Button;
 import android.widget.EditText;
-import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -28,8 +25,8 @@ public class TerminalActivity extends Activity {
     private static final String TAG = "TerminalActivity";
     private static final int REQUEST_STORAGE_PERMISSION = 2001;
 
-    private TextView tvOutput;
-    private ScrollView scrollOutput;
+    private TermuxTerminal term;
+    private boolean isFallbackShell = false;
     private EditText etInput;
     private Button btnSend;
     private Button btnClose;
@@ -37,12 +34,8 @@ public class TerminalActivity extends Activity {
     private Button btnBrowser;
     private TextView tvTitle;
 
-    private Process process;
-    private OutputStream stdin;
-    private Thread stdoutThread;
-    private Thread stderrThread;
     private volatile boolean running = false;
-    private boolean isFallbackShell = false;
+    private long sessionStartAt = 0;
 
     private String rootfsPath;
     private String rootfsName;
@@ -61,8 +54,7 @@ public class TerminalActivity extends Activity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_terminal);
 
-        tvOutput = findViewById(R.id.tv_output);
-        scrollOutput = findViewById(R.id.scroll_output);
+        term = new TermuxTerminal(this, findViewById(R.id.terminal_container));
         etInput = findViewById(R.id.et_input);
         btnSend = findViewById(R.id.btn_send);
         btnClose = findViewById(R.id.btn_close);
@@ -232,7 +224,7 @@ public class TerminalActivity extends Activity {
             if (!rootfsDir.getAbsolutePath().equals(canonicalRootfs.getAbsolutePath())) {
                 appendOutput("[诊断] 检测到符号链接路径，已转换为规范路径。\n");
             }
-        } catch (IOException e) {
+        } catch (Exception e) {
             appendOutput("[诊断] 无法获取规范路径: " + e.getMessage() + "\n");
         }
 
@@ -313,45 +305,26 @@ public class TerminalActivity extends Activity {
             appendOutput("Shell: " + shell + "\n");
             appendOutput("----------------------------------------\n");
 
-            ProcessBuilder pb = new ProcessBuilder(cmd);
-            pb.environment().clear();
-            for (String e : env) {
-                int eq = e.indexOf('=');
-                if (eq > 0) pb.environment().put(e.substring(0, eq), e.substring(eq + 1));
-            }
-            pb.redirectErrorStream(false);
-            pb.directory(getFilesDir());
-
-            process = pb.start();
-            stdin = process.getOutputStream();
+            // v34：改由 Termux 的 pty 启动（libtermux.so 的 posix_openpt + forkpty）
+            // 这样 rootfs 内的程序 isatty() 为真，ANSI 彩色 / 全屏程序 / resize 全部正常
             running = true;
             isFallbackShell = false;
+            sessionStartAt = System.currentTimeMillis();
+            term.setOnSessionFinished(() -> {
+                running = false;
+                if (isFallbackShell) return;
+                long alive = System.currentTimeMillis() - sessionStartAt;
+                if (alive < 3000) {
+                    appendOutput("\nproot 启动失败，自动进入 Android Shell...\n");
+                    startFallbackShell();
+                }
+            });
+            term.start(cmd, getFilesDir().getAbsolutePath(), env);
 
             // v24：前台服务保活 —— app 退到后台后进程不被冻结，容器不断网
             startContainerService();
 
-            stdoutThread = new Thread(() -> readStream(process.getInputStream(), false));
-            stdoutThread.start();
-
-            stderrThread = new Thread(() -> readStream(process.getErrorStream(), true));
-            stderrThread.start();
-
-            new Thread(() -> {
-                try {
-                    int exitCode = process.waitFor();
-                    running = false;
-                    appendOutput("\n----------------------------------------\n");
-                    appendOutput("proot 进程已退出，代码: " + exitCode + "\n");
-                    if (exitCode != 0) {
-                        appendOutput("proot 启动失败，自动进入 Android Shell...\n");
-                        runOnUiThread(this::startFallbackShell);
-                    }
-                } catch (InterruptedException e) {
-                    // ignore
-                }
-            }).start();
-
-        } catch (IOException e) {
+        } catch (Exception e) {
             appendOutput("proot 启动失败: " + e.getMessage() + "\n");
             appendOutput("自动进入 Android Shell (/system/bin/sh)...\n");
             Log.e(TAG, "Failed to start proot", e);
@@ -360,13 +333,8 @@ public class TerminalActivity extends Activity {
     }
 
     private void startFallbackShell() {
-        if (running) {
-            try {
-                if (process != null) process.destroy();
-                if (stdin != null) stdin.close();
-            } catch (IOException e) { /* ignore */ }
-            running = false;
-        }
+        running = false;
+        if (term != null) term.shutdown();
 
         try {
             String[] cmd = installer.buildAndroidShellCommand();
@@ -377,38 +345,16 @@ public class TerminalActivity extends Activity {
             appendOutput("PATH 包含: " + installer.getBinDir().getAbsolutePath() + ":/system/bin\n");
             appendOutput("========================================\n");
 
-            ProcessBuilder pb = new ProcessBuilder(cmd);
-            pb.environment().clear();
-            for (String e : env) {
-                int eq = e.indexOf('=');
-                if (eq > 0) pb.environment().put(e.substring(0, eq), e.substring(eq + 1));
-            }
-            pb.redirectErrorStream(false);
-            pb.directory(getFilesDir());
-
-            process = pb.start();
-            stdin = process.getOutputStream();
             running = true;
             isFallbackShell = true;
+            sessionStartAt = System.currentTimeMillis();
+            term.setOnSessionFinished(() -> {
+                running = false;
+                appendOutput("\nShell 已退出\n");
+            });
+            term.start(cmd, getFilesDir().getAbsolutePath(), env);
 
-            stdoutThread = new Thread(() -> readStream(process.getInputStream(), false));
-            stdoutThread.start();
-
-            stderrThread = new Thread(() -> readStream(process.getErrorStream(), true));
-            stderrThread.start();
-
-            new Thread(() -> {
-                try {
-                    int exitCode = process.waitFor();
-                    running = false;
-                    appendOutput("\n----------------------------------------\n");
-                    appendOutput("Shell 已退出，代码: " + exitCode + "\n");
-                } catch (InterruptedException e) {
-                    // ignore
-                }
-            }).start();
-
-        } catch (IOException e) {
+        } catch (Exception e) {
             appendOutput("Android Shell 启动失败: " + e.getMessage() + "\n");
             Log.e(TAG, "Failed to start fallback shell", e);
         }
@@ -431,32 +377,12 @@ public class TerminalActivity extends Activity {
         }
     }
 
-    private void readStream(InputStream in, boolean isError) {
-        try {
-            byte[] buf = new byte[4096];
-            int len;
-            while ((len = in.read(buf)) > 0) {
-                final String text = new String(buf, 0, len);
-                runOnUiThread(() -> appendOutput(text));
-            }
-        } catch (IOException e) {
-            if (running) {
-                Log.e(TAG, "Stream read error", e);
-            }
-        }
-    }
-
     private void sendInput() {
         String cmd = etInput.getText().toString();
-        if (stdin != null && running) {
-            try {
-                stdin.write((cmd + "\n").getBytes());
-                stdin.flush();
-                history.add(cmd);
-                historyIndex = history.size();
-            } catch (IOException e) {
-                appendOutput("写入失败: " + e.getMessage() + "\n");
-            }
+        if (running && term != null) {
+            term.write(cmd + "\r");
+            history.add(cmd);
+            historyIndex = history.size();
         }
         etInput.setText("");
     }
@@ -475,21 +401,7 @@ public class TerminalActivity extends Activity {
     }
 
     private void appendOutput(String text) {
-        runOnUiThread(() -> {
-            tvOutput.append(text);
-            // 只数新增内容里的 \n，不重复扫描全文
-            for (int i = 0; i < text.length(); i++) {
-                if (text.charAt(i) == '\n') lineCount++;
-            }
-            if (lineCount > Config.MAX_TERMINAL_LINES) {
-                String full = tvOutput.getText().toString();
-                int keep = full.length() / 2;
-                tvOutput.setText(full.substring(keep));
-                // 截断后重算行数
-                lineCount = countLines(tvOutput.getText().toString());
-            }
-            scrollOutput.post(() -> scrollOutput.fullScroll(View.FOCUS_DOWN));
-        });
+        term.append(text);
     }
 
     private static int countLines(String s) {
@@ -506,23 +418,15 @@ public class TerminalActivity extends Activity {
         running = false;
         // v24：会话结束，停掉容器保活服务（释放通知与 WakeLock）
         try { stopService(new Intent(this, ContainerService.class)); } catch (Exception e) { /* ignore */ }
-        if (process != null) {
-            process.destroy();
-            try {
-                if (stdin != null) stdin.close();
-            } catch (IOException e) { /* ignore */ }
-        }
+        if (term != null) term.shutdown();
     }
 
     @Override
     public void onBackPressed() {
-        if (stdin != null && running) {
-            try {
-                stdin.write(4);
-                stdin.flush();
-                Toast.makeText(this, getString(R.string.toast_ctrl_d), Toast.LENGTH_SHORT).show();
-                return;
-            } catch (IOException e) { /* ignore */ }
+        if (running && term != null) {
+            term.write("\u0004");
+            Toast.makeText(this, getString(R.string.toast_ctrl_d), Toast.LENGTH_SHORT).show();
+            return;
         }
         super.onBackPressed();
     }
