@@ -8,32 +8,34 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.provider.Settings;
 import android.util.Log;
-import android.view.KeyEvent;
+import android.view.Gravity;
 import android.view.View;
-import android.view.inputmethod.EditorInfo;
+import android.view.ViewGroup;
 import android.widget.Button;
-import android.widget.EditText;
+import android.widget.HorizontalScrollView;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.File;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
 public class TerminalActivity extends Activity {
     private static final String TAG = "TerminalActivity";
     private static final int REQUEST_STORAGE_PERMISSION = 2001;
+    private static final int MAX_TABS = 5;
 
-    private TermuxTerminal term;
-    private boolean isFallbackShell = false;
-    private EditText etInput;
-    private Button btnSend;
-    private Button btnClose;
-    private Button btnX11;
-    private Button btnBrowser;
+    private final List<TermuxTerminal> terminals = new ArrayList<>();
+    private int currentIndex = -1;
+
     private TextView tvTitle;
+    private Button btnClose, btnNewTab, btnMinimize;
+    private LinearLayout tabBar;
+    private HorizontalScrollView tabScroller;
+    private LinearLayout extraKeys;
 
+    private boolean isFallbackShell = false;
     private volatile boolean running = false;
     private long sessionStartAt = 0;
 
@@ -43,80 +45,326 @@ public class TerminalActivity extends Activity {
     private boolean realSim = false;
     private ProotInstaller installer;
 
-    private final List<String> history = new ArrayList<>();
-    private int historyIndex = -1;
-
-    /** 当前缓冲区行数（增量维护，避免每次 append 都对全文 split） */
-    private int lineCount = 0;
+    private boolean ctrlToggle = false;
+    private boolean altToggle = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_terminal);
 
-        term = new TermuxTerminal(this, findViewById(R.id.terminal_container));
-        etInput = findViewById(R.id.et_input);
-        btnSend = findViewById(R.id.btn_send);
-        btnClose = findViewById(R.id.btn_close);
-        btnX11 = findViewById(R.id.btn_x11);
-        btnBrowser = findViewById(R.id.btn_browser);
         tvTitle = findViewById(R.id.tv_title);
+        btnClose = findViewById(R.id.btn_close);
+        btnNewTab = findViewById(R.id.btn_new_tab);
+        btnMinimize = findViewById(R.id.btn_minimize);
+        tabBar = findViewById(R.id.tab_bar);
+        tabScroller = findViewById(R.id.tab_scroller);
+        extraKeys = findViewById(R.id.extra_keys);
 
         rootfsPath = getIntent().getStringExtra("rootfs_path");
         rootfsName = getIntent().getStringExtra("rootfs_name");
         x11Command = getIntent().getStringExtra("x11_command");
-        // v24：神秘入口开启「真实模拟」后，用 Tiny Container 启动命令拉起 proot
         realSim = "1".equals(getIntent().getStringExtra("real_sim"));
         if (rootfsName != null) tvTitle.setText(rootfsName);
 
-        // X11 命令模式：左上角显示「X11」按钮（唤起 termux-x11 服务端界面）
-        boolean x11Mode = x11Command != null && !x11Command.trim().isEmpty();
-        btnX11.setVisibility(x11Mode ? View.VISIBLE : View.GONE);
-        btnBrowser.setVisibility(View.GONE);
-        btnX11.setOnClickListener(v -> {
-            // v21：不再拉起内置 pulse；音频由用户在 Termux 侧自行处理
-            if (!X11Support.launchTermuxX11(this)) {
-                Toast.makeText(this, getString(R.string.x11_launch_failed, Config.TERMUX_X11_PKG), Toast.LENGTH_SHORT).show();
-            }
-        });
-
         installer = new ProotInstaller(this);
 
-        btnSend.setOnClickListener(v -> sendInput());
         btnClose.setOnClickListener(v -> finish());
+        btnMinimize.setOnClickListener(v -> moveTaskToBack(true));
+        btnNewTab.setOnClickListener(v -> newTab());
 
-        etInput.setOnEditorActionListener((v, actionId, event) -> {
-            if (actionId == EditorInfo.IME_ACTION_SEND ||
-                (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER)) {
-                sendInput();
-                return true;
-            }
-            return false;
-        });
-
-        etInput.setOnKeyListener((v, keyCode, event) -> {
-            if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
-                    navigateHistory(-1);
-                    return true;
-                } else if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-                    navigateHistory(1);
-                    return true;
-                }
-            }
-            return false;
-        });
-
+        buildExtraKeys();
         requestAllFilesAccess();
-        startProot();
+
+        // 第一个标签
+        newTab();
     }
 
-    // 项目零 AndroidX 依赖，保留 startActivityForResult 并压制废弃告警
+    // ============================================================
+    // 多标签管理
+    // ============================================================
+
+    private void newTab() {
+        if (terminals.size() >= MAX_TABS) {
+            Toast.makeText(this, "最多 " + MAX_TABS + " 个终端", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        ViewGroup container = findViewById(R.id.terminal_container);
+        TermuxTerminal term = new TermuxTerminal(this, container);
+        terminals.add(term);
+        int idx = terminals.size() - 1;
+        selectTab(idx);
+        rebuildTabBar();
+
+        // 启动 proot（在后台线程准备）
+        final TermuxTerminal t = term;
+        new Thread(() -> startProotIn(t)).start();
+    }
+
+    private void selectTab(int idx) {
+        if (idx < 0 || idx >= terminals.size()) return;
+        currentIndex = idx;
+        for (int i = 0; i < terminals.size(); i++) {
+            terminals.get(i).setViewVisibility(i == idx ? View.VISIBLE : View.GONE);
+        }
+        rebuildTabBar();
+    }
+
+    private void closeTab(int idx) {
+        if (idx < 0 || idx >= terminals.size()) return;
+        TermuxTerminal t = terminals.remove(idx);
+        t.shutdown();
+        // 从 container 移除 view
+        ViewGroup container = findViewById(R.id.terminal_container);
+        container.removeView(t.getView());
+        if (terminals.isEmpty()) {
+            finish();
+            return;
+        }
+        if (currentIndex >= terminals.size()) currentIndex = terminals.size() - 1;
+        selectTab(currentIndex);
+    }
+
+    private TermuxTerminal currentTerm() {
+        if (currentIndex < 0 || currentIndex >= terminals.size()) return null;
+        return terminals.get(currentIndex);
+    }
+
+    private void rebuildTabBar() {
+        tabBar.removeAllViews();
+        if (terminals.size() <= 1) {
+            tabScroller.setVisibility(View.GONE);
+            return;
+        }
+        tabScroller.setVisibility(View.VISIBLE);
+        for (int i = 0; i < terminals.size(); i++) {
+            Button b = new Button(this);
+            b.setText(String.valueOf(i + 1));
+            b.setTextSize(11);
+            b.setAllCaps(false);
+            int pad = dp(10);
+            b.setPadding(pad, dp(2), pad, dp(2));
+            int finalI = i;
+            b.setOnClickListener(v -> selectTab(finalI));
+            b.setOnLongClickListener(v -> {
+                closeTab(finalI);
+                return true;
+            });
+            if (i == currentIndex) {
+                b.setBackgroundColor(0xFF4A6FA5);
+                b.setTextColor(0xFFFFFFFF);
+            } else {
+                b.setBackgroundColor(0xFF2a2a3e);
+                b.setTextColor(0xFFAAAAAA);
+            }
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, dp(26));
+            lp.setMargins(dp(2), 0, dp(2), 0);
+            tabBar.addView(b, lp);
+        }
+    }
+
+    private int dp(int v) {
+        return (int) (v * getResources().getDisplayMetrics().density);
+    }
+
+    // ============================================================
+    // 快捷键栏
+    // ============================================================
+
+    private void buildExtraKeys() {
+        addKey("ESC", () -> writeCurrent("\u001b"));
+        addKey("TAB", () -> writeCurrent("\t"));
+        addKey("CTRL", () -> {
+            ctrlToggle = !ctrlToggle;
+            TermuxTerminal t = currentTerm();
+            if (t != null) t.setCtrlActive(ctrlToggle);
+            refreshKeyHighlight();
+        });
+        addKey("ALT", () -> {
+            altToggle = !altToggle;
+            TermuxTerminal t = currentTerm();
+            if (t != null) t.setAltActive(altToggle);
+            refreshKeyHighlight();
+        });
+        addKey("HOME", () -> writeCurrent("\u001b[H"));
+        addKey("↑", () -> writeCurrent("\u001b[A"));
+        addKey("END", () -> writeCurrent("\u001b[F"));
+        addKey("PGUP", () -> writeCurrent("\u001b[5~"));
+        addKey("←", () -> writeCurrent("\u001b[D"));
+        addKey("↓", () -> writeCurrent("\u001b[B"));
+        addKey("→", () -> writeCurrent("\u001b[C"));
+        addKey("PGDN", () -> writeCurrent("\u001b[6~"));
+    }
+
+    private Button ctrlBtn, altBtn;
+
+    private void addKey(String label, Runnable onClick) {
+        Button b = new Button(this);
+        b.setText(label);
+        b.setTextSize(11);
+        b.setAllCaps(false);
+        b.setMinWidth(0);
+        b.setMinHeight(0);
+        int pad = dp(8);
+        b.setPadding(pad, dp(2), pad, dp(2));
+        b.setBackgroundColor(0xFF3a3a4e);
+        b.setTextColor(0xFFDDDDDD);
+        b.setOnClickListener(v -> {
+            onClick.run();
+            // CTRL/ALT 是 toggle，其他按完不自动取消
+            if (!"CTRL".equals(label) && !"ALT".equals(label)) {
+                // 按普通键后清除修饰键
+                if (ctrlToggle || altToggle) {
+                    ctrlToggle = false;
+                    altToggle = false;
+                    TermuxTerminal t = currentTerm();
+                    if (t != null) { t.setCtrlActive(false); t.setAltActive(false); }
+                    refreshKeyHighlight();
+                }
+            }
+        });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(28));
+        lp.setMargins(dp(2), 0, dp(2), 0);
+        extraKeys.addView(b, lp);
+        if ("CTRL".equals(label)) ctrlBtn = b;
+        if ("ALT".equals(label)) altBtn = b;
+    }
+
+    private void refreshKeyHighlight() {
+        if (ctrlBtn != null) ctrlBtn.setBackgroundColor(ctrlToggle ? 0xFF4A6FA5 : 0xFF3a3a4e);
+        if (altBtn != null) altBtn.setBackgroundColor(altToggle ? 0xFF4A6FA5 : 0xFF3a3a4e);
+    }
+
+    private void writeCurrent(String s) {
+        TermuxTerminal t = currentTerm();
+        if (t != null) t.write(s);
+    }
+
+    // ============================================================
+    // proot 启动逻辑（与之前一致，改为写入指定 term）
+    // ============================================================
+
+    private void appendTo(TermuxTerminal t, String s) {
+        if (t != null) t.append(s);
+    }
+
+    private void startProotIn(TermuxTerminal t) {
+        if (rootfsPath == null) {
+            appendTo(t, "错误: 未指定 rootfs 路径，进入 Android Shell\n");
+            startFallbackShellIn(t);
+            return;
+        }
+        File rootfsDir = new File(rootfsPath);
+        if (!rootfsDir.exists()) {
+            appendTo(t, "错误: rootfs 目录不存在: " + rootfsPath + "\n");
+            startFallbackShellIn(t);
+            return;
+        }
+        installer.prepareRuntime();
+        String shell = installer.defaultShellPath(rootfsDir);
+
+        File shellFile = new File(rootfsDir, shell.substring(1));
+        boolean shellLinkExists = false;
+        try {
+            shellLinkExists = java.nio.file.Files.exists(
+                    shellFile.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS);
+        } catch (Exception ignored) { }
+        boolean busyboxExists = new File(rootfsDir, "bin/busybox").isFile()
+            || new File(rootfsDir, "usr/bin/busybox").isFile();
+        if (!shellLinkExists && !busyboxExists) {
+            appendTo(t, "[诊断] " + shell + " 不存在！\n");
+        } else {
+            appendTo(t, "[诊断] " + shell + " 可用\n");
+        }
+
+        File canonicalRootfs;
+        try {
+            canonicalRootfs = rootfsDir.getCanonicalFile();
+        } catch (Exception e) {
+            canonicalRootfs = rootfsDir;
+        }
+        launchProotIn(t, canonicalRootfs, shell);
+    }
+
+    private void launchProotIn(TermuxTerminal t, File canonicalRootfs, String shell) {
+        try {
+            String qemuArch = SimConfig.getQemuArch(this, rootfsName);
+            if (!SimConfig.QEMU_NONE.equals(qemuArch)) {
+                String realArch = SimConfig.detectRootfsArch(canonicalRootfs);
+                if (realArch != null && !realArch.equals(qemuArch)) {
+                    appendTo(t, "[诊断] 模拟器自动切换: " + qemuArch + " → " + realArch + "\n");
+                    SimConfig.setQemuArch(this, rootfsName, realArch);
+                    qemuArch = realArch;
+                }
+                appendTo(t, "[QEMU] 跨架构: " + qemuArch + "\n");
+                if (!QemuSupport.isHostReady(this, qemuArch)) {
+                    appendTo(t, "[QEMU] 部署内置模拟器...\n");
+                    try {
+                        appendTo(t, "[QEMU] " + QemuSupport.ensureInstalled(this, canonicalRootfs, qemuArch) + "\n");
+                    } catch (Exception e) {
+                        appendTo(t, "[QEMU] 部署失败: " + e.getMessage() + "\n");
+                    }
+                }
+            }
+
+            String[] cmd;
+            if (x11Command != null && !x11Command.trim().isEmpty()) {
+                cmd = installer.buildProotExecCommand(canonicalRootfs, x11Command.trim());
+            } else if (realSim) {
+                cmd = installer.buildTinyContainerCommand(canonicalRootfs, shell);
+            } else {
+                cmd = installer.buildProotCommand(canonicalRootfs, shell);
+            }
+            String[] env = installer.buildEnv();
+
+            appendTo(t, "启动 proot...\n");
+            appendTo(t, "RootFS: " + rootfsName + "  Shell: " + shell + "\n");
+            appendTo(t, "----------------------------------------\n");
+
+            running = true;
+            isFallbackShell = false;
+            sessionStartAt = System.currentTimeMillis();
+            t.setOnSessionFinished(() -> {
+                running = false;
+                int code = -1;
+                try {
+                    if (t.getSession() != null) code = t.getSession().getExitStatus();
+                } catch (Exception ignored) { }
+                long alive = System.currentTimeMillis() - sessionStartAt;
+                appendTo(t, "\nproot 已退出: exit=" + code + " 存活 " + alive + "ms\n");
+            });
+            t.start(cmd, getFilesDir().getAbsolutePath(), env);
+            startContainerService();
+        } catch (Exception e) {
+            appendTo(t, "proot 启动失败: " + e.getMessage() + "\n");
+            startFallbackShellIn(t);
+        }
+    }
+
+    private void startFallbackShellIn(TermuxTerminal t) {
+        try {
+            String[] cmd = installer.buildAndroidShellCommand();
+            String[] env = installer.buildAndroidEnv();
+            appendTo(t, "\nAndroid Shell (/system/bin/sh)\n");
+            running = true;
+            isFallbackShell = true;
+            t.setOnSessionFinished(() -> running = false);
+            t.start(cmd, getFilesDir().getAbsolutePath(), env);
+        } catch (Exception e) {
+            appendTo(t, "Shell 启动失败: " + e.getMessage() + "\n");
+        }
+    }
+
+    // ============================================================
+    // 权限 / 服务
+    // ============================================================
+
     @SuppressWarnings("deprecation")
     private void requestAllFilesAccess() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             if (!Environment.isExternalStorageManager()) {
-                appendOutput("[系统] 正在申请所有文件访问权限...\n");
                 try {
                     Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
                     intent.setData(Uri.parse("package:" + getPackageName()));
@@ -125,12 +373,8 @@ public class TerminalActivity extends Activity {
                     try {
                         Intent intent = new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
                         startActivityForResult(intent, REQUEST_STORAGE_PERMISSION);
-                    } catch (Exception e2) {
-                        appendOutput("[系统] 无法跳转权限设置，请手动授权\n");
-                    }
+                    } catch (Exception e2) { }
                 }
-            } else {
-                appendOutput("[系统] 已获得所有文件访问权限\n");
             }
         }
     }
@@ -139,278 +383,12 @@ public class TerminalActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQUEST_STORAGE_PERMISSION) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                if (Environment.isExternalStorageManager()) {
-                    appendOutput("[系统] 所有文件访问权限已授予\n");
-                } else {
-                    appendOutput("[系统] 未授予所有文件访问权限，/sdcard 可能无法访问\n");
-                }
-            }
-        }
     }
 
-    private void startProot() {
-        if (rootfsPath == null) {
-            appendOutput("错误: 未指定 rootfs 路径，进入 Android Shell\n");
-            startFallbackShell();
-            return;
-        }
-
-        File rootfsDir = new File(rootfsPath);
-        if (!rootfsDir.exists()) {
-            appendOutput("错误: rootfs 目录不存在: " + rootfsPath + "\n");
-            startFallbackShell();
-            return;
-        }
-
-        // 仿照 openclaw：启动前准备 fake /proc|/sys 数据、resolv.conf、
-        // 运行时目录，确保 proot 容器内工具（apt/dpkg/网络）可用
-        installer.prepareRuntime();
-
-        // 默认交互 shell（v19 方案）：rootfs 的 /bin/sh，其次 bash/zsh
-        String shell = installer.defaultShellPath(rootfsDir);
-
-        // Diagnose: 判断 shell 是否可用
-        // v29：/bin/sh 在很多 rootfs（alpine / debian bootstrap）里是指向 busybox 的
-        // 符号链接，File.exists() 会在宿主文件系统里解析绝对链接（/bin/busybox
-        // 在宿主上当然不存在）从而误报「rootfs 解压不完整」。这里用
-        // NOFOLLOW_LINKS 判断链接本身，并把 busybox 存在作为兜底。
-        File shellFile = new File(rootfsDir, shell.substring(1)); // remove leading /
-        boolean shellLinkExists = false;
-        try {
-            shellLinkExists = java.nio.file.Files.exists(
-                shellFile.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS);
-        } catch (Exception ignored) { }
-        boolean busyboxExists = new File(rootfsDir, "bin/busybox").isFile()
-            || new File(rootfsDir, "usr/bin/busybox").isFile();
-        if (!shellLinkExists && !busyboxExists) {
-            appendOutput("[诊断] " + shell + " 不存在！rootfs 可能解压不完整。\n");
-            appendOutput("[诊断] rootfs 路径: " + rootfsDir.getAbsolutePath() + "\n");
-            appendOutput("[诊断] 请删除此 rootfs 后重新下载解压。\n");
-            // List bin directory contents for debugging
-            File binDir = new File(rootfsDir, "bin");
-            if (binDir.exists() && binDir.isDirectory()) {
-                String[] files = binDir.list();
-                if (files != null) {
-                    appendOutput("[诊断] bin/ 目录内容 (" + files.length + " 个文件):\n");
-                    StringBuilder sb = new StringBuilder();
-                    for (int i = 0; i < Math.min(files.length, 30); i++) {
-                        sb.append(files[i]).append(" ");
-                    }
-                    if (files.length > 30) sb.append("...");
-                    appendOutput(sb.toString() + "\n");
-                }
-            }
-        } else if (!busyboxExists && !shellFile.canExecute()) {
-            appendOutput("[诊断] " + shell + " 存在但没有执行权限！\n");
-            appendOutput("[诊断] 这是旧版解压的 rootfs，文件权限未正确设置。\n");
-            appendOutput("[诊断] 请删除此 rootfs 后重新下载解压（新版已修复权限问题）。\n");
-            // Try to fix permissions
-            shellFile.setExecutable(true, false);
-            appendOutput("[诊断] 已尝试自动修复 " + shell + " 的执行权限。\n");
-        } else if (shellLinkExists && !shellFile.canExecute()) {
-            appendOutput("[诊断] " + shell + " 是符号链接（宿主侧不解析，容器内指向 busybox），视为可用。\n");
-        } else {
-            appendOutput("[诊断] " + shell + " 存在且有执行权限。\n");
-        }
-
-        // Resolve canonical path to avoid symlink issues (/data/data -> /data/user/0)
-        File canonicalRootfs = rootfsDir;
-        try {
-            canonicalRootfs = rootfsDir.getCanonicalFile();
-            appendOutput("[诊断] rootfs 绝对路径: " + rootfsDir.getAbsolutePath() + "\n");
-            appendOutput("[诊断] rootfs 规范路径: " + canonicalRootfs.getAbsolutePath() + "\n");
-            if (!rootfsDir.getAbsolutePath().equals(canonicalRootfs.getAbsolutePath())) {
-                appendOutput("[诊断] 检测到符号链接路径，已转换为规范路径。\n");
-            }
-        } catch (Exception e) {
-            appendOutput("[诊断] 无法获取规范路径: " + e.getMessage() + "\n");
-        }
-
-        // Also fix permissions for all files in bin/ directory
-        File binDir = new File(canonicalRootfs, "bin");
-        if (binDir.exists() && binDir.isDirectory()) {
-            File[] binFiles = binDir.listFiles();
-            if (binFiles != null) {
-                int fixed = 0;
-                for (File f : binFiles) {
-                    if (f.isFile() && !f.canExecute()) {
-                        f.setExecutable(true, false);
-                        fixed++;
-                    }
-                }
-                if (fixed > 0) {
-                    appendOutput("[诊断] 已自动修复 bin/ 目录下 " + fixed + " 个文件的执行权限。\n");
-                }
-            }
-        }
-
-        // v21：不再内置/拉起 pulseaudio，直接进 rootfs。
-        // 音频需自行在 Termux 侧起 pulse TCP daemon 并 export PULSE_SERVER。
-        final File cf = canonicalRootfs;
-        new Thread(() -> launchProot(cf, shell)).start();
-    }
-
-    private void launchProot(File canonicalRootfs, String shell) {
-        try {
-            // v25：跨架构模拟（真实模拟）——先确保 qemu 模拟器可用
-            String qemuArch = SimConfig.getQemuArch(this, rootfsName);
-            if (!SimConfig.QEMU_NONE.equals(qemuArch)) {
-                // v31：自动校验 rootfs 真实架构，防止模拟器选错
-                // （x86_64 的 rootfs 配 qemu-i386 会直接 execve Permission denied）
-                String realArch = SimConfig.detectRootfsArch(canonicalRootfs);
-                if (realArch != null) {
-                    appendOutput("[诊断] rootfs 实际架构: " + realArch + "\n");
-                    if (!realArch.equals(qemuArch)) {
-                        appendOutput("[诊断] 所选模拟器 " + qemuArch + " 与实际架构不符，已自动切换为 "
-                            + realArch + "\n");
-                        SimConfig.setQemuArch(this, rootfsName, realArch);
-                        qemuArch = realArch;
-                    }
-                }
-                appendOutput("[QEMU] 跨架构模拟: " + qemuArch
-                    + "（内置 qemu-user " + SimConfig.qemuPkgArch() + "，离线）\n");
-                if (!QemuSupport.isHostReady(this, qemuArch)) {
-                    appendOutput("[QEMU] 正在部署 APK 内置模拟器（无需联网）...\n");
-                    try {
-                        appendOutput("[QEMU] " + QemuSupport.ensureInstalled(this, canonicalRootfs, qemuArch) + "\n");
-                    } catch (Exception e) {
-                        appendOutput("[QEMU] 内置模拟器部署失败: " + e.getMessage() + "\n");
-                    }
-                } else {
-                    File hq = QemuSupport.hostQemu(this, qemuArch);
-                    appendOutput("[QEMU] 模拟器已就绪: " + (hq == null ? "?" : hq.getAbsolutePath()) + "\n");
-                }
-            }
-
-            String[] cmd;
-            if (x11Command != null && !x11Command.trim().isEmpty()) {
-                // X11 命令模式：非交互，跑用户命令（buildProotExecCommand 已注入 DISPLAY）
-                cmd = installer.buildProotExecCommand(canonicalRootfs, x11Command.trim());
-                appendOutput("[X11] 运行: " + x11Command.trim() + "\n");
-                appendOutput("[X11] DISPLAY=" + Config.X11_DISPLAY + "\n");
-            } else if (realSim) {
-                // v24 真实模拟（v25 改名「运行带有容器检测的二进制」）：
-                // Tiny Container 启动命令（模板来自 files/config/launch.conf）
-                cmd = installer.buildTinyContainerCommand(canonicalRootfs, shell);
-                appendOutput("[容器检测] 使用 Tiny Container 启动命令（运行带有容器检测的二进制）\n");
-            } else {
-                cmd = installer.buildProotCommand(canonicalRootfs, shell);
-            }
-            String[] env = installer.buildEnv();
-
-            appendOutput("启动 proot...\n");
-            appendOutput("RootFS: " + rootfsName + "\n");
-            appendOutput("Shell: " + shell + "\n");
-            appendOutput("[诊断] 宿主 ABI: " + String.join("/", android.os.Build.SUPPORTED_ABIS)
-                    + " pageSize=" + pageSizeKb() + "KB\n");
-            appendOutput("[诊断] 完整命令: " + joinCmd(cmd) + "\n");
-            appendOutput("[诊断] PATH=" + getEnv(env, "PATH") + "\n");
-            appendOutput("[诊断] LD_LIBRARY_PATH=" + getEnv(env, "LD_LIBRARY_PATH") + "\n");
-            appendOutput("----------------------------------------\n");
-
-            // v34：改由 Termux 的 pty 启动（libtermux.so 的 posix_openpt + forkpty）
-            // 这样 rootfs 内的程序 isatty() 为真，ANSI 彩色 / 全屏程序 / resize 全部正常
-            running = true;
-            isFallbackShell = false;
-            sessionStartAt = System.currentTimeMillis();
-            term.setOnSessionFinished(() -> {
-                running = false;
-                if (isFallbackShell) return;
-                // v34.3：不再自动跳 Android Shell —— 那会把真正的报错滚掉。
-                // 把退出码和提示留在终端里，让失败原因可见。
-                int code = -1;
-                try {
-                    if (term.getSession() != null) code = term.getSession().getExitStatus();
-                } catch (Exception ignored) {
-                }
-                long alive = System.currentTimeMillis() - sessionStartAt;
-                appendOutput("\n========================================\n");
-                appendOutput("proot 已退出: exit=" + code + " 存活 " + alive + "ms\n");
-                appendOutput("如需进入 Android Shell，点「退出」后再从主界面进，或在此输入 exit\n");
-                appendOutput("========================================\n");
-            });
-            term.start(cmd, getFilesDir().getAbsolutePath(), env);
-
-            // v24：前台服务保活 —— app 退到后台后进程不被冻结，容器不断网
-            startContainerService();
-
-        } catch (Exception e) {
-            appendOutput("proot 启动失败: " + e.getMessage() + "\n");
-            appendOutput("自动进入 Android Shell (/system/bin/sh)...\n");
-            Log.e(TAG, "Failed to start proot", e);
-            startFallbackShell();
-        }
-    }
-
-    private static String joinCmd(String[] cmd) {
-        StringBuilder sb = new StringBuilder();
-        for (String c : cmd) {
-            if (sb.length() > 0) sb.append(' ');
-            sb.append(c);
-        }
-        return sb.toString();
-    }
-
-    private static String getEnv(String[] env, String key) {
-        for (String e : env) {
-            if (e.startsWith(key + "=")) return e.substring(key.length() + 1);
-        }
-        return "(unset)";
-    }
-
-    private static int pageSizeKb() {
-        try {
-            java.io.BufferedReader r = new java.io.BufferedReader(
-                    new java.io.FileReader("/proc/self/smaps_rollup"));
-            String line;
-            while ((line = r.readLine()) != null) {
-                if (line.startsWith("KernelPageSize:")) {
-                    r.close();
-                    return Integer.parseInt(line.replaceAll("[^0-9]", "")) / 4;
-                }
-            }
-            r.close();
-        } catch (Exception ignored) {
-        }
-        return -1;
-    }
-
-    private void startFallbackShell() {
-        running = false;
-        if (term != null) term.shutdown();
-
-        try {
-            String[] cmd = installer.buildAndroidShellCommand();
-            String[] env = installer.buildAndroidEnv();
-
-            appendOutput("\n========================================\n");
-            appendOutput("Android Shell (/system/bin/sh)\n");
-            appendOutput("PATH 包含: " + installer.getBinDir().getAbsolutePath() + ":/system/bin\n");
-            appendOutput("========================================\n");
-
-            running = true;
-            isFallbackShell = true;
-            sessionStartAt = System.currentTimeMillis();
-            term.setOnSessionFinished(() -> {
-                running = false;
-                appendOutput("\nShell 已退出\n");
-            });
-            term.start(cmd, getFilesDir().getAbsolutePath(), env);
-
-        } catch (Exception e) {
-            appendOutput("Android Shell 启动失败: " + e.getMessage() + "\n");
-            Log.e(TAG, "Failed to start fallback shell", e);
-        }
-    }
-
-    /** v24：启动容器前台保活服务（通知栏常驻 + WakeLock）。 */
     private void startContainerService() {
         try {
             Intent svc = new Intent(this, ContainerService.class);
-            svc.putExtra(ContainerService.EXTRA_ROOTFS_NAME,
-                rootfsName != null ? rootfsName : "rootfs");
+            svc.putExtra(ContainerService.EXTRA_ROOTFS_NAME, rootfsName != null ? rootfsName : "rootfs");
             svc.putExtra(ContainerService.EXTRA_ROOTFS_PATH, rootfsPath);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(svc);
@@ -418,61 +396,22 @@ public class TerminalActivity extends Activity {
                 startService(svc);
             }
         } catch (Exception e) {
-            Log.w(TAG, "start ContainerService failed: " + e.getMessage());
+            Log.w(TAG, "start ContainerService failed", e);
         }
-    }
-
-    private void sendInput() {
-        String cmd = etInput.getText().toString();
-        if (running && term != null) {
-            term.write(cmd + "\r");
-            history.add(cmd);
-            historyIndex = history.size();
-        }
-        etInput.setText("");
-    }
-
-    private void navigateHistory(int dir) {
-        if (history.isEmpty()) return;
-        historyIndex += dir;
-        if (historyIndex < 0) historyIndex = 0;
-        if (historyIndex >= history.size()) {
-            historyIndex = history.size();
-            etInput.setText("");
-            return;
-        }
-        etInput.setText(history.get(historyIndex));
-        etInput.setSelection(etInput.getText().length());
-    }
-
-    private void appendOutput(String text) {
-        term.append(text);
-    }
-
-    private static int countLines(String s) {
-        int n = 0;
-        for (int i = 0; i < s.length(); i++) {
-            if (s.charAt(i) == '\n') n++;
-        }
-        return n;
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
         running = false;
-        // v24：会话结束，停掉容器保活服务（释放通知与 WakeLock）
-        try { stopService(new Intent(this, ContainerService.class)); } catch (Exception e) { /* ignore */ }
-        if (term != null) term.shutdown();
+        try { stopService(new Intent(this, ContainerService.class)); } catch (Exception e) { }
+        for (TermuxTerminal t : terminals) t.shutdown();
+        terminals.clear();
     }
 
     @Override
     public void onBackPressed() {
-        if (running && term != null) {
-            term.write("\u0004");
-            Toast.makeText(this, getString(R.string.toast_ctrl_d), Toast.LENGTH_SHORT).show();
-            return;
-        }
-        super.onBackPressed();
+        // 返回键 = 最小化到后台（前台服务保活）
+        moveTaskToBack(true);
     }
 }

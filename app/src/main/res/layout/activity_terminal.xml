@@ -5,6 +5,7 @@
     android:orientation="vertical"
     android:background="@color/terminal_bg">
 
+    <!-- 标题栏 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="38dp"
@@ -12,30 +13,6 @@
         android:background="@color/primary_dark"
         android:gravity="center_vertical"
         android:paddingHorizontal="8dp">
-
-        <Button
-            android:id="@+id/btn_browser"
-            android:layout_width="wrap_content"
-            android:layout_height="28dp"
-            android:minHeight="28dp"
-            android:text="@string/btn_browser"
-            android:textSize="10sp"
-            android:background="@drawable/bg_btn_accent"
-            android:textColor="@android:color/white"
-            android:paddingHorizontal="8dp"
-            android:visibility="gone" />
-
-        <Button
-            android:id="@+id/btn_x11"
-            android:layout_width="wrap_content"
-            android:layout_height="28dp"
-            android:minHeight="28dp"
-            android:text="@string/btn_x11"
-            android:textSize="10sp"
-            android:background="@drawable/bg_btn_accent"
-            android:textColor="@android:color/white"
-            android:paddingHorizontal="8dp"
-            android:visibility="gone" />
 
         <TextView
             android:id="@+id/tv_title"
@@ -46,6 +23,30 @@
             android:textColor="@android:color/white"
             android:textSize="12sp"
             android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/btn_new_tab"
+            android:layout_width="32dp"
+            android:layout_height="28dp"
+            android:minHeight="28dp"
+            android:text="+"
+            android:textSize="14sp"
+            android:background="@drawable/bg_btn_accent"
+            android:textColor="@android:color/white"
+            android:paddingHorizontal="0dp"
+            android:layout_marginEnd="6dp" />
+
+        <Button
+            android:id="@+id/btn_minimize"
+            android:layout_width="32dp"
+            android:layout_height="28dp"
+            android:minHeight="28dp"
+            android:text="-"
+            android:textSize="14sp"
+            android:background="@drawable/bg_btn_accent"
+            android:textColor="@android:color/white"
+            android:paddingHorizontal="0dp"
+            android:layout_marginEnd="6dp" />
 
         <Button
             android:id="@+id/btn_close"
@@ -59,6 +60,24 @@
             android:paddingHorizontal="10dp" />
     </LinearLayout>
 
+    <!-- 标签栏 -->
+    <HorizontalScrollView
+        android:id="@+id/tab_scroller"
+        android:layout_width="match_parent"
+        android:layout_height="32dp"
+        android:background="#1a1a2e"
+        android:scrollbars="none"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:id="@+id/tab_bar"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:orientation="horizontal"
+            android:gravity="center_vertical" />
+    </HorizontalScrollView>
+
+    <!-- 终端容器 -->
     <FrameLayout
         android:id="@+id/terminal_container"
         android:layout_width="match_parent"
@@ -66,40 +85,20 @@
         android:layout_weight="1"
         android:background="@color/terminal_bg" />
 
-    <LinearLayout
+    <!-- 快捷键栏（Termux extra keys 风格） -->
+    <HorizontalScrollView
+        android:id="@+id/extra_keys_scroller"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:background="@color/surface"
-        android:padding="4dp"
-        android:visibility="gone"
-        android:gravity="center_vertical">
+        android:layout_height="36dp"
+        android:background="#2a2a3e"
+        android:scrollbars="none">
 
-        <EditText
-            android:id="@+id/et_input"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:hint="输入命令..."
-            android:textColor="@color/text_primary"
-            android:textColorHint="@color/text_secondary"
-            android:background="@drawable/bg_input"
-            android:textSize="11sp"
-            android:fontFamily="monospace"
-            android:padding="6dp"
-            android:imeOptions="actionSend"
-            android:inputType="text" />
-
-        <Button
-            android:id="@+id/btn_send"
+        <LinearLayout
+            android:id="@+id/extra_keys"
             android:layout_width="wrap_content"
-            android:layout_height="28dp"
-            android:minHeight="28dp"
-            android:text="发送"
-            android:textSize="10sp"
-            android:background="@drawable/bg_btn_primary"
-            android:textColor="@android:color/white"
-            android:paddingHorizontal="8dp"
-            android:layout_marginStart="4dp" />
-    </LinearLayout>
+            android:layout_height="match_parent"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="4dp" />
+    </HorizontalScrollView>
 </LinearLayout>

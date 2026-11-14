@@ -61,6 +61,8 @@ public class TermuxTerminal implements TerminalViewClient, TerminalSessionClient
     private String[] pendingEnv;
     private int textSize = DEFAULT_TEXT_SIZE;
     private Runnable onSessionFinished;
+    private boolean ctrlActive = false;
+    private boolean altActive = false;
 
     public TermuxTerminal(Activity activity, ViewGroup container) {
         this.activity = activity;
@@ -89,6 +91,16 @@ public class TermuxTerminal implements TerminalViewClient, TerminalSessionClient
     public TerminalView getView() {
         return view;
     }
+
+    public void setViewVisibility(int vis) {
+        view.setVisibility(vis);
+        if (statusView != null) statusView.setVisibility(vis == View.VISIBLE ? View.VISIBLE : View.GONE);
+    }
+
+    public void setCtrlActive(boolean v) { this.ctrlActive = v; }
+    public boolean isCtrlActive() { return ctrlActive; }
+    public void setAltActive(boolean v) { this.altActive = v; }
+    public boolean isAltActive() { return altActive; }
 
     public TerminalSession getSession() {
         return session;
@@ -432,12 +444,12 @@ public class TermuxTerminal implements TerminalViewClient, TerminalSessionClient
 
     @Override
     public boolean readControlKey() {
-        return false;
+        return ctrlActive;
     }
 
     @Override
     public boolean readAltKey() {
-        return false;
+        return altActive;
     }
 
     @Override
