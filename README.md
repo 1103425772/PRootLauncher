@@ -1,122 +1,185 @@
 # PRoot Launcher
 
-在 Android 上不 root 运行 Linux 容器（Debian / Alpine / 任意 rootfs）的启动器。
+**在 Android 上跑完整 Linux，不用 root。**
 
-- 内置 proot，通过 proot 绑定 rootfs 进容器
-- X11：用户自装 [Termux:X11](https://github.com/termux/termux-x11)（未装时 App 跳浏览器 releases 页），
-  App 用 `app_process` 启动 X server。v26 起采用新版官方方式：
-  `CLASSPATH=<termux-x11 APK> app_process / --nice-name=termux-x11 com.termux.x11.CmdEntryPoint :0`，
-  旧版 termux-x11 自动回退内置 loader.apk（修复 Android 12+ 上旧 loader 的 exit code 134 崩溃）
-- 内置 pulseaudio 17.0（Termux 构建），匿名 TCP 4713 给容器出声
-- Java AudioTrack 桥接（v27 重做，修复 Android 16 无声 / Android 11 正常）：
-  先起 `AudioService`（mediaPlayback 前台服务）→ 建 MediaSession → **先拿音频焦点再起播** →
-  焦点丢失/闪避回调 → 部分写入补齐 → 播放头可播性探测（被系统静默丢弃时如实报错，不再装作在跑）
-- 音频降级链（v27）：A = pipe-sink(AudioTrack) → B = **aaudio-sink(AAudio)** → C = sles-sink(仅 API<26) → D = null-sink；
-  Android 16 上 OpenSL ES 初始化报 `Failed to initialize OpenSL ES: error 12`，v26 的 B 档必失败并落到
-  只有 null-sink 的"假成功"，现改为 AAudio（模块已随包附带，无需重新编译 native 组件）
-- GPU：纯 llvmpipe 软渲染（v24 起彻底移除 VirGL）
-- 神秘入口（长按容器项）：开启「运行带有容器检测的二进制」后使用
-  [Tiny Container](https://github.com/Cateners/tiny_container) 的 proot 启动命令
-  （命令模板来自 app 配置文件 `files/config/launch.conf`）；跨架构模拟（QEMU 8 架构，
-  qemu-user 来自 [tur-packages](https://github.com/termux-user-repository/tur)）
-- UI：Material 3（v26 起弃用 Miuix），用户可自定义主题色（12 种预设 + 任意 HEX）与
-  浅色/深色/跟随系统模式
+<p>
+<img src="docs/screenshots/01-main-running-window.jpg" width="24%" />
+<img src="docs/screenshots/02-multitab.jpg" width="24%" />
+<img src="docs/screenshots/03-neofetch-x86_64.jpg" width="24%" />
+<img src="docs/screenshots/04-neofetch-armv7.jpg" width="24%" />
+</p>
 
-## 构建（Gradle）
+当前版本 **v36.0 / 1.16.0**（versionCode 53）。下载见 [Releases](https://github.com/1103425772/PRootLauncher/releases)。
 
-依赖：JDK 17、Android SDK（platform 36 / build-tools 34.0.0）。
+---
+
+## 它能做什么
+
+| 能力 | 说明 |
+|---|---|
+| **下载即跑** | 主界面填 rootfs 下载链接（`.tar.gz` / `.tar.xz`）或选本地文件，自动解压、修权限、识别发行版 |
+| **真终端，不是玩具** | 接入 Termux `terminal-emulator` / `terminal-view` 源码 + `libtermux.so`，完整 pty、ANSI 彩色、光标、退格、Ctrl 组合键都正常 |
+| **多标签** | 单个窗口最多 5 个终端会话，标签栏点击切换，长按关闭 |
+| **快捷键栏** | `ESC` `TAB` `CTRL` `ALT` `HOME` `↑` `END` `PGUP` `←` `↓` `→` `PGDN`；`CTRL`/`ALT` 是 toggle，点亮后下一次按键自动带修饰 |
+| **最小化回主界面** | 点 `-` 或系统返回键直接回主界面，proot 进程留在后台继续跑，不 `finish`、不 `shutdown` |
+| **运行中窗口列表** | 主界面顶部列出所有活着的终端窗口，点「打开」切回去，点「✕」直接关掉 |
+| **跨架构** | 内置 QEMU（arm64 + arm 32 位两套），自动探测 rootfs 架构，天玑 7300 上跑 `ubuntu-amd64` 的 `apt update` 实测正常 |
+| **三种启动方式** | 长按容器项：Web 终端（自动装 ttyd）/ 进入 RootFS（Shell）/ 运行 X11 程序 |
+| **X11** | 用 `app_process` 拉起 Termux:X11 server，旧版 loader 自动回退（修 Android 12+ 的 exit 134） |
+| **声音** | 内置 pulseaudio 17.0 + AudioTrack 桥接，走 AAudio 降级链，Android 16 正常出声 |
+| **主题** | Material 3，12 种预设色 + 任意 HEX，浅色/深色/跟随系统 |
+
+---
+
+## 快速开始
+
+1. 从 [Releases](https://github.com/1103425772/PRootLauncher/releases) 下载 `PRootLauncher-v36.0-hi.apk`（Android 12+）。
+2. 安装后打开，主界面已预填 Alpine 官方源地址，直接点「下载并解压」。
+3. 列表里出现的发行版点「启动」进终端，输 `neofetch` 试试。
+4. 想跑桌面就装 [Termux:X11](https://github.com/termux/termux-x11)，长按容器项选「运行 X11 程序」。
+
+装应用需要给「所有文件访问权限」，否则解压 rootfs 会失败。
+
+---
+
+## 终端操作
+
+**标签**
+右上角 `+` 新建（上限 5 个），标签栏点数字切换，长按标签关闭。
+
+**快捷键栏**
+底部一排 `ESC TAB CTRL ALT HOME ↑ END PGUP ← ↓ → PGDN`。
+`CTRL` / `ALT` 点一下高亮，下一次按键自动加修饰，按完其他键自动取消。
+`vim`、`less`、`top`、`htop` 都能正常用。
+
+**最小化 vs 退出**
+- `-` 按钮 / 返回键 → 回主界面，容器继续在后台跑
+- `退出` 按钮 → 结束会话，收回资源
+
+**主界面「运行中窗口」**
+每张卡片显示 rootfs 名称，`打开` 切回终端，`✕` 关闭。主界面本身也算一个窗口，回到这里就能再选别的发行版另开一个，互不干扰。
+
+---
+
+## 跨架构模拟
+
+不用手动配 qemu。启动时自动 `detectRootfsArch` 探测 rootfs 真实架构，和你选的目标架构不一致就自动纠正，然后引导对应 `qemu-user`。
+
+支持 `x86_64` / `i386` / `arm` / `aarch64` / `m68k` / `ppc` / `ppc64` / `riscv64` / `riscv32`，已自动隐藏与本机相同的架构。
+
+**为什么必须内置、不能放 files 目录**
+Android 16 的 W^X 禁止从 app 私有 `files/` 目录 mmap 可执行 `.so`，导致
+`CANNOT LINK EXECUTABLE libqemu_x86_64.so: library "libandroid-shmem.so" not found`。
+所以：
+
+- 全部 qemu 二进制和依赖库打进 `nativeLibraryDir`（`jniLibs/`）
+- 13 个无版本号后缀的库直接复制进 `jniLibs/`
+- 10 个带 SONAME 版本号的库（`libglib-2.0.so.0`、`libdw.so.1`、`libz.so.1` 等）AGP 会按 `lib*.so` 规则过滤掉，改用 ndk-build `PREBUILT` + `LOCAL_MODULE_FILENAME` 编译，再用 `zip -0 -r` 追加进 APK 的 `lib/<abi>/`，最后 `zipalign` + `apksigner` 重签名
+
+`assets/qemu/arm64/lib/` 23 个库，`assets/qemu/arm/lib/` 22 个库。
+
+---
+
+## 构建
+
+依赖 JDK 17、Android SDK（platform 36 / build-tools 34.0.0）、NDK 26.1。
 
 ```bash
-# 构建 hi（targetSdk 34，Android 12+）
+# Android 12+ (targetSdk 34)
 gradle :app:assembleHiRelease
 
-# 构建 lo（targetSdk 28，Android 9-11）
+# Android 9-11 (targetSdk 28)
 gradle :app:assembleLoRelease
-
-# 或一次性两个
-gradle :app:assembleHiRelease :app:assembleLoRelease
 ```
 
-产物在 `app/build/outputs/apk/hi/release/` 与 `app/build/outputs/apk/lo/release/`。
+**注意**：AGP 构建完的 APK 缺 10 个带版本号后缀的 qemu 库，必须手动补齐再签名：
 
-签名：`keystore/debug.keystore`（storepass/keypass = `android`），v14 起固定项目内
-keystore，保证覆盖升级不丢 rootfs。证书 SHA-256：
-`84e5e6eafea116099ccfe41af44a03590fd43ee4022fcde9bb552eb8ea0cc0ce`。
+```bash
+MB=app/build/intermediates/merged_jni_libs/hiRelease/mergeHiReleaseJniLibFolders/out
+mkdir -p /tmp/qemulibs/lib/arm64-v8a /tmp/qemulibs/lib/armeabi-v7a
+for f in libglib-2.0.so.0 libgmodule-2.0.so.0 libdw.so.1 libelf.so.1 libhogweed.so.6 \
+         libnettle.so.8 libz.so.1 libzstd.so.1 liblzma.so.5 libbz2.so.1.0; do
+  cp $MB/arm64-v8a/$f /tmp/qemulibs/lib/arm64-v8a/
+  cp $MB/armeabi-v7a/$f /tmp/qemulibs/lib/armeabi-v7a/
+done
+cp app/build/outputs/apk/hi/release/app-hi-release.apk /tmp/app-unsigned.apk
+cd /tmp/qemulibs && zip -0 -r -q /tmp/app-unsigned.apk lib/
+zipalign -f 4 /tmp/app-unsigned.apk /tmp/app-aligned.apk
+apksigner sign --ks keystore/debug.keystore --ks-pass pass:android \
+  --key-pass pass:android --out /tmp/app-signed.apk /tmp/app-aligned.apk
+```
+
+签名固定用项目内 `keystore/debug.keystore`（`android`/`android`），保证覆盖升级不丢 rootfs。
+证书 SHA-256：`84e5e6eafea116099ccfe41af44a03590fd43ee4022fcde9bb552eb8ea0cc0ce`
+
+---
 
 ## 目录
 
 ```
 app/src/
+  main/kotlin/com/proot/launcher/
+    MainActivity.kt        主界面（Compose Material 3）：下载 / 列表 / 运行中窗口 / 外观
+    ThemeSettings.kt       主题：模式 + 种子色 → ColorScheme
   main/java/com/proot/launcher/
-    MainActivity.kt       主页 / rootfs 管理 / 神秘入口 / 外观设置（Compose Material 3）
-    ThemeSettings.kt      主题：模式 + 种子色 → ColorScheme（纯 Kotlin，minSdk 24）
-    TerminalActivity.java 内置终端（默认 proot 命令 或 真实模拟 Tiny Container 命令）
+    TerminalActivity.java  终端窗口：多标签 / 快捷键栏 / 最小化 / 窗口注册表
+    TermuxTerminal.java    Termux 终端封装：pty、修饰键、view 可见性
     WebTerminalActivity.java  ttyd web 终端
-    ProotInstaller.java   proot 命令拼装 + env 注入（PULSE_SERVER / DISPLAY / QEMU / real-sim）
-    SimConfig.java        app 配置文件 files/config/launch.conf（真实模拟开关 + 跨架构 + 命令模板）
-    ContainerService.java 前台服务：容器会话后台保活（防冻结断网）
-    X11Support.java       X11 双模式启动（CmdEntryPoint / 内置 loader 回退）+ XKB + 版本检测
-    AudioSupport.java     pulseaudio 启停 + TCP 4713（多策略 + 落盘日志）
-    AudioBridge.java      AudioTrack ↔ FIFO PCM 桥（v27：焦点先行 + MediaSession + 可播性探测）
-    AudioService.java     mediaPlayback 前台服务（Android 14+ 后台出声的合法身份）
-    GpuSupport.java       llvmpipe / Wayland env（无 virgl）
-    QemuSupport.java      qemu-user 跨架构引导
-    TtydService.java      ttyd web 终端服务
-  main/assets/audio/<abi>/   pulseaudio 17.0 运行时（从 Termux deb 解包）
-  main/assets/x11/loader.apk 旧版 loader stub（旧 termux-x11 回退用）
-  main/assets/proot/         proot 静态二进制（.so 命名，安装后 exec）
-  main/assets/termux-exec/   termux-exec（容器内命令包装）
-  main/jniLibs/<abi>/        libproot / libproot_loader / libpulseaudio
-  main/res/                  资源（XML drawable / strings / styles）
-  hi/AndroidManifest.xml     高版本清单（targetSdk 34）
-  lo/AndroidManifest.xml     低版本清单（targetSdk 28）
+    ProotInstaller.java    proot 命令拼装 + env 注入（PULSE_SERVER / DISPLAY / QEMU）
+    SimConfig.java         files/config/launch.conf（真实模拟开关 + 跨架构 + 命令模板）
+    ContainerService.java  前台服务：容器会话后台保活
+    X11Support.java        X11 双模式启动 + XKB + 版本检测
+    AudioSupport.java      pulseaudio 启停 + TCP 4713
+    AudioBridge.java       AudioTrack ↔ FIFO PCM 桥（焦点先行 + 可播性探测）
+    AudioService.java      mediaPlayback 前台服务
+    QemuSupport.java       qemu-user 跨架构引导
+    GpuSupport.java        llvmpipe / Wayland env（无 VirGL）
+    TtydService.java       ttyd web 终端服务
+  main/java/com/termux/terminal/    Termux terminal-emulator 源码（18 个类）
+  main/java/com/termux/view/        Termux terminal-view 源码
+  main/jni/                 termux.c + Android.mk（libtermux.so + 10 个 PREBUILT 库）
+  main/jniLibs/<abi>/       libproot / libproot_loader / libpulseaudio / libtermux / qemu + 依赖
+  main/assets/qemu/<abi>/lib/   内置 qemu 运行时（arm64 23 个 / arm 22 个）
+  main/assets/audio/<abi>/      pulseaudio 17.0 运行时（Termux deb 解包）
+  main/assets/proot/            proot 静态二进制（.so 命名，装后 exec）
+  main/assets/termux-exec/      termux-exec（容器内命令包装）
+  main/assets/x11/loader.apk    旧版 loader stub
+  hi/AndroidManifest.xml    targetSdk 34
+  lo/AndroidManifest.xml    targetSdk 28
 ```
 
-## 神秘入口 / 真实模拟 / 跨架构
+---
 
-长按 rootfs 列表项 → 高级设置：
+## 兼容性
 
-- **运行带有容器检测的二进制**：proot 改用 Tiny Container 的启动命令
-  （伪造 /proc、/sys、selinux 环境，绕过后台检测），命令模板存于
-  `files/config/launch.conf`。
-- **跨架构模拟（QEMU）**：可选 x86_64 / i386 / arm / aarch64 / m68k / ppc / ppc64 / riscv64，
-  启动时自动引导对应 `qemu-user-*` 模拟器（tur-packages 包），并注入
-  `QEMU_LD_PREFIX` 等环境。已自动排除与本机架构相同的选项。
+| 项目 | 状态 |
+|---|---|
+| Android 16（天玑 7300-Ultra） | 已验证：`ubuntu-amd64` / `alpine` 跨架构正常 |
+| Android 12+ | 支持（W^X 限制已通过 nativeLibraryDir 绕过） |
+| Android 9-11 | `lo` 变体 |
+| arm64-v8a / armeabi-v7a | 两套 qemu 都内置，离线可用 |
+| VirGL / Mesa Zink 硬件加速 | 不支持，纯 llvmpipe 软渲染 |
 
-## 容器内使用
+---
 
-```bash
-# 音频（env 已由 App 注入，无需手动 export）
-pactl list short sinks
-speaker-test -c2 -t wav -l1
+## 致谢
 
-# X11
-DISPLAY=:0 xterm
+打包/借鉴了这些开源项目：
 
-# GPU（默认 llvmpipe 软渲染）
-LIBGL_ALWAYS_SOFTWARE=1 glxgears
-```
+- **[Termux](https://github.com/termux/termux-app)** — `terminal-emulator` / `terminal-view` 源码（ANSI 与 pty 基础）、`assets/audio/` 内 pulseaudio 17.0 与 libpulse（GPLv2/LGPL）
+- **[proot](https://github.com/proot/proot)** — 用户空间 chroot（静态编译，GPLv2）
+- **[pulseaudio](https://gitlab.freedesktop.org/pulseaudio/pulseaudio)** — 声音服务器（LGPLv2.1）
+- **[Termux:X11](https://github.com/termux/termux-x11)** — X server 与 `app_process` 启动方式
+- **[tur-packages](https://github.com/termux-user-repository/tur)** — qemu-user 跨架构包
+- **[Tiny Container](https://github.com/Cateners/tiny_container)** — 「运行带有容器检测的二进制」启动命令参考
+- **[PCL](https://github.com/Meloong-Git/PCL)** — 蓝色 UI 风格参考
+- **[Compose Material 3](https://developer.android.com/jetpack/androidx/releases/compose-material3)** — UI 组件（Apache 2.0）
+- **[XZ for Java](https://tukaani.org/xz/java.html)** — tar.xz 解压（公有领域）
 
-## 致谢 / 引用
+rootfs 由用户自行下载（Alpine / Ubuntu / Debian 等），本仓库不附带 rootfs 二进制。
 
-本项目打包/借鉴了以下开源项目的二进制与思路：
-
-- **[Termux](https://github.com/termux/termux-app)** — `assets/audio/` 内的
-  pulseaudio 17.0、libpulse 从 Termux APT 源（`https://packages.termux.dev/apt/`）
-  对应 deb 包解出，遵循 Termux 的 GPLv2/LGPL 许可。
-- **[proot](https://github.com/proot/proot)** — 用户空间 chroot 工具（静态编译，GPLv2）。
-- **[pulseaudio](https://gitlab.freedesktop.org/pulseaudio/pulseaudio)** — 声音服务器，LGPLv2.1。
-- **[Termux:X11](https://github.com/termux/termux-x11)** — X server 实现与 loader 启动方式参考。
-- **[tur-packages](https://github.com/termux-user-repository/tur)** — qemu-user 跨架构模拟包。
-- **[Tiny Container](https://github.com/Cateners/tiny_container)** — 「运行带有容器检测的二进制」
-  模式的 proot 启动命令参考。
-- **[PCL](https://github.com/Meloong-Git/PCL)** — 蓝色 UI 风格参考。
-- **[material3](https://developer.android.com/jetpack/androidx/releases/compose-material3)** —
-  UI 组件（AndroidX），Apache 2.0。
-- **[XZ for Java](https://tukaani.org/xz/java.html)** — tar.xz 解压，公有领域。
-
-容器内 rootfs 由用户自行下载（Debian / Alpine / Ubuntu 等），本仓库不附带 rootfs 二进制。
+---
 
 ## 许可
 
-代码部分 MIT；`assets/audio/`、`assets/proot/` 内第三方二进制遵循其上游许可。
+代码部分 MIT；`assets/audio/`、`assets/proot/`、`assets/qemu/` 内第三方二进制遵循其上游许可。
