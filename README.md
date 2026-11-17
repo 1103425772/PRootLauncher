@@ -1,5 +1,8 @@
 # PRoot Launcher
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Android](https://img.shields.io/badge/Android-8.0%2B-green.svg)](https://github.com/1103425772/PRootLauncher/releases)
+
 **在 Android 上跑完整 Linux，不用 root。**
 
 <p>
@@ -182,4 +185,15 @@ rootfs 由用户自行下载（Alpine / Ubuntu / Debian 等），本仓库不附
 
 ## 许可
 
-代码部分 MIT；`assets/audio/`、`assets/proot/`、`assets/qemu/` 内第三方二进制遵循其上游许可。
+本项目**自有代码**采用 [MIT License](LICENSE) —— 可自由使用、修改、商用、再分发，只需保留版权声明。
+
+以下第三方组件**不受 MIT 覆盖**，分别遵循其上游许可，分发时请一并遵守：
+
+| 路径 / 组件 | 上游许可 |
+|---|---|
+| `app/src/main/java/com/termux/terminal/`、`com/termux/view/` | GPLv2（Termux terminal-emulator / terminal-view） |
+| `assets/proot/`、`libproot.so` | GPLv2（proot） |
+| `assets/audio/`（pulseaudio 17.0）、`libpulseaudio.so` | LGPLv2.1（pulseaudio） |
+| `assets/qemu/`、`libqemu_*.so` | GPLv2（QEMU） |
+
+如果你把本项目改成闭源商业发布，需要先自行替换掉上表列出的 GPL 组件（例如改用系统自带 proot 或自行实现），否则整体分发仍需满足 GPL。
