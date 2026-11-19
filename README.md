@@ -12,7 +12,7 @@
 <img src="docs/screenshots/04-neofetch-armv7.jpg" width="24%" />
 </p>
 
-当前版本 **v36.0 / 1.16.0**（versionCode 53）。下载见 [Releases](https://github.com/1103425772/PRootLauncher/releases)。
+当前版本 **v37.1 / 1.17.1**（versionCode 55）。下载见 [Releases](https://github.com/1103425772/PRootLauncher/releases)。
 
 ---
 
@@ -30,13 +30,15 @@
 | **三种启动方式** | 长按容器项：Web 终端（自动装 ttyd）/ 进入 RootFS（Shell）/ 运行 X11 程序 |
 | **X11** | 用 `app_process` 拉起 Termux:X11 server，旧版 loader 自动回退（修 Android 12+ 的 exit 134） |
 | **声音** | 内置 pulseaudio 17.0 + AudioTrack 桥接，走 AAudio 降级链，Android 16 正常出声 |
+| **本地 API** | 一套 REST + WebSocket + 裸 TCP 三种接入，所有功能都能远程调用：列 rootfs、下载/删除/重命名、起会话、转发终端、端口转发 |
+| **自定义 DISPLAY** | 主界面可填任意 `DISPLAY`（`:0` / `:1` / `127.0.0.1:10.0`），也可按单次会话覆盖 |
 | **主题** | Material 3，12 种预设色 + 任意 HEX，浅色/深色/跟随系统 |
 
 ---
 
 ## 快速开始
 
-1. 从 [Releases](https://github.com/1103425772/PRootLauncher/releases) 下载 `PRootLauncher-v36.0-hi.apk`（Android 12+）。
+1. 从 [Releases](https://github.com/1103425772/PRootLauncher/releases) 下载 `PRootLauncher-v37.1-hi.apk`（Android 12+）。
 2. 安装后打开，主界面已预填 Alpine 官方源地址，直接点「下载并解压」。
 3. 列表里出现的发行版点「启动」进终端，输 `neofetch` 试试。
 4. 想跑桌面就装 [Termux:X11](https://github.com/termux/termux-x11)，长按容器项选「运行 X11 程序」。
@@ -63,6 +65,68 @@
 每张卡片显示 rootfs 名称，`打开` 切回终端，`✕` 关闭。主界面本身也算一个窗口，回到这里就能再选别的发行版另开一个，互不干扰。
 
 ---
+
+## 本地 API
+
+主界面「本地 API」开关打开后，App 会在本机起两个端口，一套逻辑三种接入：
+
+| 通道 | 地址 | 说明 |
+|---|---|---|
+| HTTP REST | `http://127.0.0.1:8765/api/v1/...` | 查询、管理 |
+| WebSocket | `ws://127.0.0.1:8765/api/v1/ws` | 通用控制，一行一个 JSON 请求 |
+| WebSocket（终端） | `ws://127.0.0.1:8765/api/v1/sessions/{id}/ws` | 终端双向流，含回滚快照 |
+| 裸 TCP | `tcp://127.0.0.1:8766` | 一行一个 JSON，`nc` 可直接用 |
+
+除 `/api/v1/status` 外都要带 token，请求头 `Authorization: Bearer <token>`，或在请求体 / URL 里带 `token`。
+
+### 端点
+
+| 方法 | 路径 | 作用 |
+|---|---|---|
+| GET | `/api/v1/status` | 版本、端口、会话数、当前 DISPLAY |
+| GET | `/api/v1/settings` | 读 DISPLAY / X11 开关 |
+| POST | `/api/v1/settings/display` | 写自定义 DISPLAY，`{"display":":1"}` |
+| POST | `/api/v1/settings/x11` | 开关 X11 注入，`{"enabled":true}` |
+| GET | `/api/v1/rootfs` | 列出已安装 rootfs |
+| POST | `/api/v1/rootfs` | 异步下载并解压，`{"url":"...","name":"可选"}`，返回 task |
+| DELETE | `/api/v1/rootfs/{name}` | 删除 |
+| POST | `/api/v1/rootfs/{name}/rename` | 重命名，`{"to":"新名字"}` |
+| GET | `/api/v1/tasks/{id}` | 下载任务进度（`percent` / `stage` / `state`） |
+| GET | `/api/v1/sessions` | 列出会话 |
+| POST | `/api/v1/sessions` | 起会话，`{"rootfs":"alpine-x86_64","cmd":"可选","display":":1"}` |
+| GET | `/api/v1/sessions/{id}` | 会话详情 |
+| DELETE | `/api/v1/sessions/{id}` | 结束会话 |
+| POST | `/api/v1/sessions/{id}/input` | 写入按键，`{"data":"ls\n"}` |
+| GET | `/api/v1/sessions/{id}/output?since=N&limit=200` | 增量读输出 |
+| GET / POST | `/api/v1/forward` | 列 / 加端口转发，`{"listen":8080,"port":80}` |
+| DELETE | `/api/v1/forward/{id}` | 删转发 |
+
+### 用 curl 走一遍
+
+```bash
+TK=$(curl -s http://127.0.0.1:8765/api/v1/status | sed 's/.*"token":"\([^"]*\)".*/\1/')
+curl -s -H "Authorization: Bearer $TK" http://127.0.0.1:8765/api/v1/rootfs
+
+# 起一个 x86_64 会话，并指定 DISPLAY
+curl -s -X POST -H "Authorization: Bearer $TK" -H 'Content-Type: application/json' \
+  -d '{"rootfs":"alpine-3.20.9-x86_64","display":":1"}' \
+  http://127.0.0.1:8765/api/v1/sessions
+
+# 往里敲命令
+curl -s -X POST -H "Authorization: Bearer $TK" -H 'Content-Type: application/json' \
+  -d '{"data":"neofetch\n"}' http://127.0.0.1:8765/api/v1/sessions/<id>/input
+```
+
+### 用裸 TCP
+
+```bash
+nc 127.0.0.1 8766
+{"method":"GET","path":"/api/v1/status","token":"<token>"}
+```
+
+### 端口转发
+
+`POST /api/v1/forward {"listen":8080,"port":80}` 之后，本机 `:8080` 会转发到容器里的 `:80`，本质是 `127.0.0.1` 上的端口映射，用来把容器内的服务（比如 ttyd、HTTP 应用）暴露出来。
 
 ## 跨架构模拟
 
