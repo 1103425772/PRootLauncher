@@ -12,7 +12,7 @@
 <img src="docs/screenshots/04-neofetch-armv7.jpg" width="24%" />
 </p>
 
-当前版本 **v37.1 / 1.17.1**（versionCode 55）。下载见 [Releases](https://github.com/1103425772/PRootLauncher/releases)。
+当前版本 **v37.2 / 1.17.2**（versionCode 56）。下载见 [Releases](https://github.com/1103425772/PRootLauncher/releases)。
 
 ---
 
@@ -38,7 +38,7 @@
 
 ## 快速开始
 
-1. 从 [Releases](https://github.com/1103425772/PRootLauncher/releases) 下载 `PRootLauncher-v37.1-hi.apk`（Android 12+）。
+1. 从 [Releases](https://github.com/1103425772/PRootLauncher/releases) 下载 `PRootLauncher-v37.2-hi.apk`（Android 12+）。
 2. 安装后打开，主界面已预填 Alpine 官方源地址，直接点「下载并解压」。
 3. 列表里出现的发行版点「启动」进终端，输 `neofetch` 试试。
 4. 想跑桌面就装 [Termux:X11](https://github.com/termux/termux-x11)，长按容器项选「运行 X11 程序」。
@@ -77,7 +77,9 @@
 | WebSocket（终端） | `ws://127.0.0.1:8765/api/v1/sessions/{id}/ws` | 终端双向流，含回滚快照 |
 | 裸 TCP | `tcp://127.0.0.1:8766` | 一行一个 JSON，`nc` 可直接用 |
 
-除 `/api/v1/status` 外都要带 token，请求头 `Authorization: Bearer <token>`，或在请求体 / URL 里带 `token`。
+**默认不需要 token**：服务只监听 `127.0.0.1`，本机任何程序直接访问即可。只有打开「允许局域网访问」（绑定 `0.0.0.0`）时才要求 token，此时用 `X-Api-Token` 请求头或 `?token=` 传入。
+
+> v37.2 起握手阶段不再做 WS 鉴权，`ws://127.0.0.1:8765/api/v1/ws` 直接可连，不会再有 401。
 
 ### 端点
 
@@ -123,6 +125,16 @@ curl -s -X POST -H "Authorization: Bearer $TK" -H 'Content-Type: application/jso
 nc 127.0.0.1 8766
 {"method":"GET","path":"/api/v1/status","token":"<token>"}
 ```
+
+### 自定义 DISPLAY
+
+`POST /api/v1/settings/display {"display":":1"}` 或主界面输入框设置后，下次点 X11 / 起会话会：
+
+1. 把 X server 真正启动在 `:1`（不是像以前硬编码 `:0`）；
+2. 容器内注入 `DISPLAY=:1`；
+3. `.X11-unix/X1` 通过 proot bind 进 rootfs 的 `/tmp/.X11-unix`。
+
+> 只支持本地编号写法（`:0` / `:1` / `:2`）。`127.0.0.1:10.0` 这种会归一化成 `:10`，因为 X server 只监听 unix socket，不监听 TCP。
 
 ### 端口转发
 
