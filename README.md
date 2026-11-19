@@ -12,7 +12,7 @@
 <img src="docs/screenshots/04-neofetch-armv7.jpg" width="24%" />
 </p>
 
-当前版本 **v37.2 / 1.17.2**（versionCode 56）。下载见 [Releases](https://github.com/1103425772/PRootLauncher/releases)。
+当前版本 **v37.3 / 1.17.3**（versionCode 57）。下载见 [Releases](https://github.com/1103425772/PRootLauncher/releases)。
 
 ---
 
@@ -100,6 +100,7 @@
 | DELETE | `/api/v1/sessions/{id}` | 结束会话 |
 | POST | `/api/v1/sessions/{id}/input` | 写入按键，`{"data":"ls\n"}` |
 | GET | `/api/v1/sessions/{id}/output?since=N&limit=200` | 增量读输出 |
+| POST | `/api/v1/exec` | 一次性执行命令，`{"rootfs":"...","cmd":"uname -a","timeout":30000}`，返回 `output` 与 `code` |
 | GET / POST | `/api/v1/forward` | 列 / 加端口转发，`{"listen":8080,"port":80}` |
 | DELETE | `/api/v1/forward/{id}` | 删转发 |
 
@@ -139,6 +140,22 @@ nc 127.0.0.1 8766
 ### 端口转发
 
 `POST /api/v1/forward {"listen":8080,"port":80}` 之后，本机 `:8080` 会转发到容器里的 `:80`，本质是 `127.0.0.1` 上的端口映射，用来把容器内的服务（比如 ttyd、HTTP 应用）暴露出来。
+
+## 命令行客户端 prl（静态）
+
+Release 里附 `prl-cli-v37.3.zip`，含三个静态二进制（arm64 / armv7 / amd64）和源码：
+
+```bash
+unzip prl-cli-v37.3.zip && chmod +x prl-arm64
+./prl-arm64 status
+./prl-arm64 ls
+./prl-arm64 start alpine-minirootfs-3.24.0-x86_64 --display :1
+./prl-arm64 attach s01          # 交互式终端，Ctrl+] 退出
+./prl-arm64 exec alpine-minirootfs-3.24.0-x86_64 uname -a
+./prl-arm64 bridge s01 --listen 7001   # 终端转 TCP，nc 127.0.0.1 7001 直接进
+```
+
+全部命令见 `./prl-arm64 help`。零第三方依赖，可静态运行在任意 Linux（含 Termux）。
 
 ## 跨架构模拟
 
